@@ -40,12 +40,18 @@ FROM users WHERE email = 'demo.seller@example.com'
 -- ===========================================
 -- 3. CATEGORIES (hierarchical)
 -- ===========================================
-INSERT INTO category (name, slug, level, parent_id, is_active, sort_order, created_at, updated_at)
-VALUES
-  ('Electronics', 'electronics', 1, NULL, true, 1, NOW(), NOW()),
-  ('Fashion', 'fashion', 1, NULL, true, 2, NOW(), NOW()),
-  ('Home & Living', 'home-living', 1, NULL, true, 3, NOW(), NOW())
-ON CONFLICT (slug) DO NOTHING;
+-- Use standard SQL MERGE so the script works on PostgreSQL 15+ and H2
+-- (PostgreSQL mode). Earlier ON CONFLICT clause was PostgreSQL-only.
+MERGE INTO category AS t
+USING (VALUES
+    ('Electronics', 'electronics', 1, NULL, true, 1),
+    ('Fashion',     'fashion',     1, NULL, true, 2),
+    ('Home & Living','home-living',1, NULL, true, 3)
+) AS s(name, slug, level, parent_id, is_active, sort_order)
+ON t.slug = s.slug
+WHEN NOT MATCHED THEN
+    INSERT (name, slug, level, parent_id, is_active, sort_order, created_at, updated_at)
+    VALUES (s.name, s.slug, s.level, s.parent_id, s.is_active, s.sort_order, NOW(), NOW());
 
 -- Subcategories
 INSERT INTO category (name, slug, level, parent_id, is_active, sort_order, created_at, updated_at)
