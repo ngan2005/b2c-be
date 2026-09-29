@@ -308,7 +308,7 @@ CREATE TABLE IF NOT EXISTS product_option_value (
 
     option_id           BIGINT NOT NULL,
 
-    value               VARCHAR(100) NOT NULL,
+    "value"             VARCHAR(100) NOT NULL,
     image_url           TEXT,
 
     sort_order          INTEGER NOT NULL DEFAULT 0,
@@ -318,7 +318,7 @@ CREATE TABLE IF NOT EXISTS product_option_value (
         REFERENCES product_option(id),
 
     CONSTRAINT uq_option_value
-        UNIQUE (option_id, value)
+        UNIQUE (option_id, "value")
 );
 
 

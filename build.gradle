@@ -61,3 +61,12 @@ dependencies {
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
 }
+
+tasks.register('supabaseSmokeTest', JavaExec) {
+    description = 'Connect to Supabase and insert a probe row to verify credentials.'
+    group = 'verification'
+    classpath = sourceSets.main.runtimeClasspath + sourceSets.test.runtimeClasspath
+    mainClass = 'com.example.B2C.SupabaseSmokeTest'
+    // DB_PASSWORD is read from the .env file by Spring Dotenv or passed via env from the shell.
+    standardOutput = System.out
+}
