@@ -14,6 +14,10 @@ import java.time.LocalDateTime;
 @Builder
 public class Role {
 
+    public static final String CODE_ADMIN = "ADMIN";
+    public static final String CODE_BUYER = "BUYER";
+    public static final String CODE_SELLER = "SELLER";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
