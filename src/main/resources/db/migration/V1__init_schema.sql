@@ -15,12 +15,18 @@ CREATE TABLE IF NOT EXISTS role (
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT INTO role (code, name, description)
-VALUES
+-- Use standard SQL MERGE for upsert so the script works on PostgreSQL 15+ and
+-- H2 (PostgreSQL mode). The earlier ON CONFLICT clause was PostgreSQL-only and
+-- failed on H2.
+MERGE INTO role AS t
+USING (VALUES
     ('BUYER',  'Buyer',  'Customer who purchases products'),
     ('SELLER', 'Seller', 'User who sells products'),
     ('ADMIN',  'Admin',  'System administrator')
-ON CONFLICT (code) DO NOTHING;
+) AS s(code, name, description)
+ON t.code = s.code
+WHEN NOT MATCHED THEN
+    INSERT (code, name, description) VALUES (s.code, s.name, s.description);
 
 
 -- =========================================================
