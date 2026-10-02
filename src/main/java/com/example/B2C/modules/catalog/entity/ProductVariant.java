@@ -1,10 +1,12 @@
 package com.example.B2C.modules.catalog.entity;
 
 import com.example.B2C.common.entity.BaseEntity;
+import com.example.B2C.modules.seller.entity.Seller;
 import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "product_variant")
@@ -59,4 +61,12 @@ public class ProductVariant extends BaseEntity {
     @Column(name = "is_active", nullable = false)
     @Builder.Default
     private Boolean isActive = true;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    @Builder.Default
+    private Long version = 0L;
+
+    @Column(name = "last_reserved_at")
+    private LocalDateTime lastReservedAt;
 }

@@ -2,6 +2,7 @@ package com.example.B2C.modules.seller.repository;
 
 import com.example.B2C.common.repository.BaseRepository;
 import com.example.B2C.modules.seller.entity.Seller;
+import com.example.B2C.modules.seller.entity.SellerStatus;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
@@ -16,4 +17,6 @@ public interface SellerRepository extends BaseRepository<Seller, Long> {
     boolean existsBySlug(String slug);
 
     Optional<Seller> findBySlug(String slug);
+
+    long countByStatus(SellerStatus status);
 }

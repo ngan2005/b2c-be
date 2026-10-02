@@ -1,8 +1,6 @@
 package com.example.B2C.modules.order.entity;
 
 import com.example.B2C.common.entity.BaseEntity;
-import com.example.B2C.modules.seller.entity.Seller;
-import com.example.B2C.modules.user.entity.User;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -25,13 +23,11 @@ public class Order extends BaseEntity {
     @Column(name = "order_code", nullable = false, unique = true, length = 50)
     private String orderCode;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "buyer_id", nullable = false)
-    private User buyer;
+    @Column(name = "buyer_id", nullable = false)
+    private Long buyerId;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "seller_id", nullable = false)
-    private Seller seller;
+    @Column(name = "seller_id", nullable = false)
+    private Long sellerId;
 
     @Column(name = "receiver_name", nullable = false, length = 150)
     private String receiverName;
@@ -62,14 +58,12 @@ public class Order extends BaseEntity {
     @Builder.Default
     private BigDecimal totalAmount = BigDecimal.ZERO;
 
-    @Enumerated(EnumType.STRING)
     @Column(name = "payment_method", nullable = false, length = 20)
-    private PaymentMethod paymentMethod;
+    private String paymentMethod;
 
-    @Enumerated(EnumType.STRING)
     @Column(name = "payment_status", nullable = false, length = 20)
     @Builder.Default
-    private PaymentStatus paymentStatus = PaymentStatus.UNPAID;
+    private String paymentStatus = "UNPAID";
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
@@ -82,9 +76,8 @@ public class Order extends BaseEntity {
     @Column(name = "cancel_reason", columnDefinition = "TEXT")
     private String cancelReason;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "cancelled_by")
-    private User cancelledBy;
+    @Column(name = "cancelled_by")
+    private Long cancelledBy;
 
     @Column(name = "confirmed_at")
     private LocalDateTime confirmedAt;
@@ -100,4 +93,7 @@ public class Order extends BaseEntity {
 
     @Column(name = "cancelled_at")
     private LocalDateTime cancelledAt;
+
+    @Column(name = "idempotency_key", length = 128)
+    private String idempotencyKey;
 }

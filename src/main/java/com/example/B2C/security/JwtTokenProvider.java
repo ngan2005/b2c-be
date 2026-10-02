@@ -58,10 +58,35 @@ public class JwtTokenProvider {
         return claimsResolver.apply(claims);
     }
 
+    /**
+     * Returns the user id stored in the token's {@code uid} claim, or null if absent.
+     * Tokens issued by {@link com.example.B2C.modules.auth.service.AuthServiceImpl}
+     * do not always include this claim — callers should treat null as "unknown user".
+     */
+    public Long extractUserId(String token) {
+        try {
+            Object uid = extractAllClaims(token).get("uid");
+            if (uid == null) return null;
+            if (uid instanceof Number n) return n.longValue();
+            return Long.valueOf(uid.toString());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     public boolean isTokenValid(String token, UserDetails userDetails) {
         try {
             final String username = extractUsername(token);
             return (username.equals(userDetails.getUsername())) && !isTokenExpired(token);
+        } catch (JwtException | IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    public boolean isTokenValid(String token, String username) {
+        try {
+            final String tokenUsername = extractUsername(token);
+            return (tokenUsername.equals(username)) && !isTokenExpired(token);
         } catch (JwtException | IllegalArgumentException e) {
             return false;
         }
