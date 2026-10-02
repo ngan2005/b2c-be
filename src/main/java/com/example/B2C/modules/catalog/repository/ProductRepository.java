@@ -15,6 +15,8 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
 
     Optional<Product> findBySlugAndDeletedAtIsNull(String slug);
 
+    Optional<Product> findByIdAndDeletedAtIsNull(Long id);
+
     boolean existsBySlug(String slug);
 
     /**
@@ -82,5 +84,34 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
           AND p.seller.id = :sellerId
         """)
     Page<Product> findActiveBySeller(@Param("sellerId") Long sellerId, Pageable pageable);
-}
 
+    /**
+     * Seller-side listing: filter by status (optional) and keyword (optional),
+     * restricted to a single seller. Used by the seller dashboard.
+     */
+    @Query("""
+        SELECT p FROM Product p
+        WHERE p.deletedAt IS NULL
+          AND p.seller = :seller
+          AND (:status IS NULL OR p.status = :status)
+          AND (
+            :keyword IS NULL
+            OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+            OR LOWER(CAST(p.description AS string)) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          )
+        """)
+    Page<Product> findAllBySeller(
+            @Param("seller") com.example.B2C.modules.seller.entity.Seller seller,
+            @Param("status") ProductStatus status,
+            @Param("keyword") String keyword,
+            Pageable pageable
+    );
+
+    long countBySellerIdAndDeletedAtIsNull(Long sellerId);
+
+    long countBySellerIdAndStatusAndDeletedAtIsNull(Long sellerId, ProductStatus status);
+
+    long countByStatusAndDeletedAtIsNull(ProductStatus status);
+
+    long countByDeletedAtIsNull();
+}

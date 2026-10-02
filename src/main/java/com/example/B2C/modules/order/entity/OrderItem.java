@@ -1,7 +1,6 @@
 package com.example.B2C.modules.order.entity;
 
-import com.example.B2C.modules.catalog.entity.Product;
-import com.example.B2C.modules.catalog.entity.ProductVariant;
+import com.example.B2C.common.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -14,28 +13,25 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class OrderItem {
+public class OrderItem extends BaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "order_id", nullable = false)
-    private Order order;
+    @Column(name = "order_id", nullable = false)
+    private Long orderId;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "variant_id", nullable = false)
-    private ProductVariant variant;
+    @Column(name = "variant_id", nullable = false)
+    private Long variantId;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_id", nullable = false)
-    private Product product;
+    @Column(name = "product_id", nullable = false)
+    private Long productId;
 
-    @Column(name = "product_name", nullable = false)
+    @Column(name = "product_name", nullable = false, length = 255)
     private String productName;
 
-    @Column(name = "variant_name")
+    @Column(name = "variant_name", length = 255)
     private String variantName;
 
     @Column(name = "image_url", columnDefinition = "TEXT")

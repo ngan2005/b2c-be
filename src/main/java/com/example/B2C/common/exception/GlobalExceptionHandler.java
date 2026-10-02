@@ -95,6 +95,20 @@ public class GlobalExceptionHandler {
         return buildError(HttpStatus.CONFLICT, ex.getMessage(), null, request);
     }
 
+    @ExceptionHandler(IdempotencyConflictException.class)
+    public ResponseEntity<ErrorResponse> handleIdempotencyConflict(
+            IdempotencyConflictException ex, HttpServletRequest request) {
+        log.warn("Idempotency conflict: {}", ex.getMessage());
+        return buildError(HttpStatus.CONFLICT, ex.getMessage(), null, request);
+    }
+
+    @ExceptionHandler(OutOfStockException.class)
+    public ResponseEntity<ErrorResponse> handleOutOfStock(
+            OutOfStockException ex, HttpServletRequest request) {
+        log.warn("Out of stock: {}", ex.getMessage());
+        return buildError(HttpStatus.CONFLICT, ex.getMessage(), null, request);
+    }
+
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ErrorResponse> handleBusinessException(
             BusinessException ex, HttpServletRequest request) {

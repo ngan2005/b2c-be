@@ -57,4 +57,7 @@ public class Payment extends BaseEntity {
 
     @Column(name = "gateway_response", columnDefinition = "jsonb")
     private String gatewayResponse;
+
+    @Column(name = "idempotency_key", length = 128)
+    private String idempotencyKey;
 }
