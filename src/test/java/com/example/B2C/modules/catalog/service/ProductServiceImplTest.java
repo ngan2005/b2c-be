@@ -40,6 +40,9 @@ class ProductServiceImplTest {
     @Mock private ProductImageRepository productImageRepository;
     @Mock private ProductOptionRepository productOptionRepository;
     @Mock private ProductOptionValueRepository productOptionValueRepository;
+    @Mock private CategoryRepository categoryRepository;
+    @Mock private com.example.B2C.modules.seller.repository.SellerRepository sellerRepository;
+    @Mock private com.example.B2C.realtime.UserPresenceService userPresenceService;
 
     @InjectMocks private ProductServiceImpl productService;
 
@@ -102,10 +105,10 @@ class ProductServiceImplTest {
                 .build();
 
         Page<Product> page = new PageImpl<>(List.of(sampleProduct), PageRequest.of(0, 20), 1);
-        when(productRepository.searchProductsWithKeyword(
-                eq(ProductStatus.ACTIVE), eq(10L), eq(1L),
+        when(productRepository.searchProductsFulltext(
+                eq(ProductStatus.ACTIVE.name()), eq(10L), eq(1L),
                 eq(new BigDecimal("10000000")), eq(new BigDecimal("50000000")),
-                eq("iphone"), any(Pageable.class))
+                eq("iphone"), eq(7), any(Pageable.class))
         ).thenReturn(page);
 
         PageResponse<ProductSummaryDto> result = productService.searchProducts(request);
@@ -116,10 +119,10 @@ class ProductServiceImplTest {
         assertThat(dto.getSlug()).isEqualTo("iphone-15-pro");
         assertThat(dto.getShopName()).isEqualTo("Test Shop");
         assertThat(dto.getCategoryName()).isEqualTo("Electronics");
-        verify(productRepository).searchProductsWithKeyword(
-                eq(ProductStatus.ACTIVE), eq(10L), eq(1L),
+        verify(productRepository).searchProductsFulltext(
+                eq(ProductStatus.ACTIVE.name()), eq(10L), eq(1L),
                 eq(new BigDecimal("10000000")), eq(new BigDecimal("50000000")),
-                eq("iphone"), any(Pageable.class));
+                eq("iphone"), eq(7), any(Pageable.class));
     }
 
     @Test

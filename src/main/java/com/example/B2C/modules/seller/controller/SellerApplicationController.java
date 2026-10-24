@@ -2,6 +2,8 @@ package com.example.B2C.modules.seller.controller;
 
 import com.example.B2C.common.response.ApiResponse;
 import com.example.B2C.modules.seller.dto.CreateSellerApplicationRequest;
+import com.example.B2C.modules.seller.dto.QuickUpgradeRequest;
+import com.example.B2C.modules.seller.dto.QuickUpgradeResponse;
 import com.example.B2C.modules.seller.dto.SellerApplicationResponse;
 import com.example.B2C.modules.seller.service.SellerApplicationService;
 import com.example.B2C.common.security.CurrentUserProvider;
@@ -41,5 +43,25 @@ public class SellerApplicationController {
         SellerApplicationResponse response = applicationService.submit(userId, request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.created(response));
+    }
+
+    // [SELLER-BUYER-UPGRADE]
+    @PostMapping("/quick-upgrade")
+    @PreAuthorize("hasRole('BUYER')")
+    @Operation(summary = "Quick-upgrade buyer to seller",
+            description = "A BUYER upgrades to become a SELLER instantly — bypasses admin review. "
+                    + "Adds SELLER role to the existing user account, creates an ACTIVE seller profile, "
+                    + "and returns fresh JWT tokens reflecting the new role set.")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Upgrade successful"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Invalid input"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "User lacks BUYER role"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "User already a seller")
+    })
+    public ResponseEntity<ApiResponse<QuickUpgradeResponse>> quickUpgrade(
+            @Valid @RequestBody QuickUpgradeRequest request) {
+        Long userId = currentUserProvider.getCurrentUserId();
+        QuickUpgradeResponse response = applicationService.quickUpgrade(userId, request);
+        return ResponseEntity.ok(ApiResponse.success(response));
     }
 }

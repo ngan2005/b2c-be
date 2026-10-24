@@ -96,4 +96,22 @@ public class Order extends BaseEntity {
 
     @Column(name = "idempotency_key", length = 128)
     private String idempotencyKey;
+
+    @Column(name = "return_reason", length = 50)
+    private String returnReason;
+
+    @Column(name = "return_description", columnDefinition = "TEXT")
+    private String returnDescription;
+
+    @Column(name = "return_requested_at")
+    private LocalDateTime returnRequestedAt;
+
+    @Column(name = "return_approved_at")
+    private LocalDateTime returnApprovedAt;
+
+    @Column(name = "return_rejected_at")
+    private LocalDateTime returnRejectedAt;
+
+    @Column(name = "return_admin_note", columnDefinition = "TEXT")
+    private String returnAdminNote;
 }

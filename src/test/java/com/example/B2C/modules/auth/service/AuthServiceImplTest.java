@@ -16,6 +16,7 @@ import com.example.B2C.modules.user.entity.UserRole;
 import com.example.B2C.modules.user.entity.UserStatus;
 import com.example.B2C.modules.user.repository.RoleRepository;
 import com.example.B2C.modules.user.repository.UserRepository;
+import com.example.B2C.modules.user.repository.UserRoleRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -41,6 +42,7 @@ import static org.mockito.Mockito.*;
 class AuthServiceImplTest {
 
     @Mock private UserRepository userRepository;
+    @Mock private UserRoleRepository userRoleRepository;
     @Mock private RoleRepository roleRepository;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private JwtTokenProvider jwtTokenProvider;
@@ -94,8 +96,11 @@ class AuthServiceImplTest {
 
             AuthResponse response = authService.register(request);
 
-            // Verify only BUYER role was written to user_roles
+            // Verify BUYER role was written to user_roles join table via userRoleRepository
             ArgumentCaptor<UserRole> userRoleCaptor = ArgumentCaptor.forClass(UserRole.class);
+            verify(userRoleRepository).save(userRoleCaptor.capture());
+            assertThat(userRoleCaptor.getValue().getRoleId()).isEqualTo(buyerRole.getId());
+
             verify(userRepository).save(any(User.class));
 
             // The register method builds UserRole manually but does NOT call userRoleRepository.save
@@ -146,8 +151,15 @@ class AuthServiceImplTest {
 
             authService.register(request);
 
-            // The service builds a UserRole and adds it to the user's roles set.
-            // No explicit userRoleRepository.save call exists, so we verify via the saved User entity.
+            // The service now persists a UserRole row via userRoleRepository.save
+            // for the BUYER join row.
+            ArgumentCaptor<UserRole> userRoleCaptor = ArgumentCaptor.forClass(UserRole.class);
+            verify(userRoleRepository).save(userRoleCaptor.capture());
+            UserRole saved = userRoleCaptor.getValue();
+            assertThat(saved.getUserId()).isEqualTo(50L);
+            assertThat(saved.getRoleId()).isEqualTo(buyerRole.getId());
+
+            // BUYER must be in the roles set (which drives the UserRole join table via JPA)
             ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
             verify(userRepository).save(userCaptor.capture());
 

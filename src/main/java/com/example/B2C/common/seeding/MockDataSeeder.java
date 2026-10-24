@@ -131,16 +131,23 @@ public class MockDataSeeder implements ApplicationRunner {
     }
 
     private void seedCategories() {
-        if (categoryRepository.findAll().stream().anyMatch(c -> "electronics".equals(c.getSlug()))) {
+        if (categoryRepository.findAll().stream().anyMatch(c -> "thiet-bi-dien-tu".equals(c.getSlug()) || "electronics".equals(c.getSlug()))) {
             return;
         }
-        Category electronics = upsertCategory("Electronics", "electronics", null, 1, 1);
-        Category fashion = upsertCategory("Fashion", "fashion", null, 1, 2);
-        Category home = upsertCategory("Home & Living", "home-living", null, 1, 3);
-        upsertCategory("Smartphones", "smartphones", electronics, 2, 1);
-        upsertCategory("Laptops", "laptops", electronics, 2, 2);
-        upsertCategory("Mens Clothing", "mens-clothing", fashion, 2, 1);
-        upsertCategory("Furniture", "furniture", home, 2, 1);
+        Category electronics = upsertCategory("Thiết Bị Điện Tử", "thiet-bi-dien-tu", null, 1, 1);
+        Category fashion = upsertCategory("Thời Trang & May Mặc", "thoi-trang-may-mac", null, 1, 2);
+        Category home = upsertCategory("Nhà Cửa & Đời Sống", "nha-cua-doi-song", null, 1, 3);
+        Category food = upsertCategory("Bách Hóa & Đồ Ăn", "bach-hoa-do-an", null, 1, 4);
+        Category beauty = upsertCategory("Sắc Đẹp & Mỹ Phẩm", "sac-dep-my-pham", null, 1, 5);
+        Category baby = upsertCategory("Mẹ & Bé", "me-va-be", null, 1, 6);
+        Category sports = upsertCategory("Thể Thao & Dã Ngoại", "the-thao-da-ngoai", null, 1, 7);
+
+        upsertCategory("Điện Thoại & Phụ Kiện", "dien-thoai-phu-kien", electronics, 2, 1);
+        upsertCategory("Máy Tính & Laptop", "may-tinh-laptop", electronics, 2, 2);
+        upsertCategory("Thời Trang Nam", "thoi-trang-nam", fashion, 2, 1);
+        upsertCategory("Thời Trang Nữ", "thoi-trang-nu", fashion, 2, 2);
+        upsertCategory("Nội Thất & Trang Trí", "noi-that-trang-tri", home, 2, 1);
+        upsertCategory("Đồ Ăn Vặt & Bánh Kẹo", "do-an-vat-banh-keo", food, 2, 1);
     }
 
     private Category upsertCategory(String name, String slug, Category parent, int level, int sortOrder) {

@@ -9,8 +9,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Getter
 public class CustomUserDetails implements UserDetails {
@@ -23,24 +23,14 @@ public class CustomUserDetails implements UserDetails {
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        // Authorities come from the join table (user_roles) plus the legacy primary role
-        // (users.role_id). A HashSet deduplicates: after approval a user holds BUYER in both
-        // places and must not end up with a doubled authority.
-        Set<GrantedAuthority> authorities = new HashSet<>();
-        addAuthority(authorities, user.getRole());
-        if (user.getRoles() != null) {
-            user.getRoles().forEach(role -> addAuthority(authorities, role));
-        }
-        return authorities;
-    }
-
-    private void addAuthority(Set<GrantedAuthority> authorities, Role role) {
-        if (role == null || role.getCode() == null) {
-            return;
-        }
-        String code = role.getCode();
-        authorities.add(new SimpleGrantedAuthority(
-                code.startsWith("ROLE_") ? code : "ROLE_" + code));
+        // Return all roles the user holds as Spring Security authorities.
+        // Since V31 the user can hold multiple roles simultaneously (BUYER + SELLER, etc.).
+        // Spring Security's hasRole() checks will now match any granted authority.
+        return user.getRoles().stream()
+                .filter(r -> r != null && r.getCode() != null)
+                .map(r -> new SimpleGrantedAuthority(
+                        r.getCode().startsWith("ROLE_") ? r.getCode() : "ROLE_" + r.getCode()))
+                .collect(Collectors.toSet());
     }
 
     @Override

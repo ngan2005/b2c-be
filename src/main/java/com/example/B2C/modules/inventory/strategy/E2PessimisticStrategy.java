@@ -27,14 +27,17 @@ public class E2PessimisticStrategy implements InventoryStrategy {
     }
 
     @Override
-    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
-    public void reserve(ProductVariant variant, int qty, Long orderId) {
-        // Re-load with pessimistic write lock
-        ProductVariant locked = repository.findByIdForUpdate(variant.getId())
-                .orElseThrow(() -> new OutOfStockException("Variant " + variant.getId() + " not found"));
+    public ProductVariantRepository repository() {
+        return repository;
+    }
 
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
+    public void reserve(Long variantId, int qty, Long orderId) {
+        ProductVariant locked = repository.findByIdForUpdate(variantId)
+                .orElseThrow(() -> new OutOfStockException("Variant " + variantId + " not found"));
         if (locked.getStockQuantity() < qty) {
-            throw new OutOfStockException("Insufficient stock for variant " + locked.getId());
+            throw new OutOfStockException("Insufficient stock for variant " + variantId);
         }
         locked.setStockQuantity(locked.getStockQuantity() - qty);
         locked.setReservedQuantity(

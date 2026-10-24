@@ -30,6 +30,38 @@ public class CartItem {
     @JoinColumn(name = "variant_id", nullable = false)
     private ProductVariant variant;
 
+    /**
+     * Denormalised variant id — read directly without traversing the ProductVariant
+     * relationship.  This field exists so that CartService / OrderServiceImpl never
+     * need to call {@code cartItem.getVariant().getId()}, which would pull the
+     * ProductVariant entity into the caller's package.
+     *
+     * <p>The column is populated by Flyway migration
+     * {@code V36__cart_item_denormalised_variant_id.sql} and kept in sync on
+     * INSERT/UPDATE via {@link #onCreate} / {@link #onUpdate}.
+     */
+    @Column(name = "variant_id_denorm")
+    private Long variantId;
+
+    /**
+     * Denormalised variant display name — avoids loading the ProductVariant entity
+     * just to render cart item names in the response DTO.
+     */
+    @Column(name = "variant_name_denorm", length = 500)
+    private String variantName;
+
+    /**
+     * Denormalised product name — same reason as {@link #variantName}.
+     */
+    @Column(name = "product_name_denorm", length = 500)
+    private String productName;
+
+    /**
+     * Denormalised image URL — same reason as {@link #variantName}.
+     */
+    @Column(name = "image_url_denorm", columnDefinition = "TEXT")
+    private String imageUrl;
+
     @Column(name = "quantity", nullable = false)
     @Builder.Default
     private Integer quantity = 1;
@@ -44,10 +76,34 @@ public class CartItem {
     @Column(name = "added_at", nullable = false, updatable = false)
     private LocalDateTime addedAt;
 
+    public Long getVariantId() {
+        if (this.variantId != null) {
+            return this.variantId;
+        }
+        return this.variant != null ? this.variant.getId() : null;
+    }
+
+    public void setVariant(ProductVariant variant) {
+        this.variant = variant;
+        if (variant != null && this.variantId == null) {
+            this.variantId = variant.getId();
+        }
+    }
+
     @PrePersist
     protected void onCreate() {
         if (this.addedAt == null) {
             this.addedAt = LocalDateTime.now();
+        }
+        if (this.variant != null && this.variantId == null) {
+            this.variantId = this.variant.getId();
+        }
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        if (this.variant != null && this.variantId == null) {
+            this.variantId = this.variant.getId();
         }
     }
 }

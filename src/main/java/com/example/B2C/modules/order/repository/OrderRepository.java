@@ -92,4 +92,79 @@ public interface OrderRepository extends BaseRepository<Order, Long> {
         """)
     java.util.List<Object[]> revenueByDayForSeller(@Param("sellerId") Long sellerId,
                                                    @Param("since") LocalDateTime since);
+
+    @Query("""
+        SELECT o FROM Order o
+        WHERE (:status IS NULL OR o.status = :status)
+        ORDER BY o.createdAt DESC
+        """)
+    org.springframework.data.domain.Page<Order> findAllAdmin(
+            @Param("status") OrderStatus status,
+            org.springframework.data.domain.Pageable pageable);
+
+    // ----- Admin stats -----
+
+    @Query("""
+        SELECT FUNCTION('DATE', o.createdAt) AS day, COALESCE(SUM(o.totalAmount), 0) AS revenue
+        FROM Order o
+        WHERE o.createdAt >= :from
+          AND o.createdAt < :to
+          AND o.status NOT IN (com.example.B2C.modules.order.entity.OrderStatus.CANCELLED,
+                               com.example.B2C.modules.order.entity.OrderStatus.RETURNED)
+        GROUP BY FUNCTION('DATE', o.createdAt)
+        ORDER BY day ASC
+        """)
+    java.util.List<Object[]> revenueByDayForAdmin(
+            @Param("from") java.time.LocalDateTime from,
+            @Param("to") java.time.LocalDateTime to);
+
+    @Query("""
+        SELECT FUNCTION('DATE_TRUNC', 'week', o.createdAt) AS period,
+               COALESCE(SUM(o.totalAmount), 0) AS revenue
+        FROM Order o
+        WHERE o.createdAt >= :from
+          AND o.createdAt < :to
+          AND o.status NOT IN (com.example.B2C.modules.order.entity.OrderStatus.CANCELLED,
+                               com.example.B2C.modules.order.entity.OrderStatus.RETURNED)
+        GROUP BY FUNCTION('DATE_TRUNC', 'week', o.createdAt)
+        ORDER BY period ASC
+        """)
+    java.util.List<Object[]> revenueByWeekForAdmin(
+            @Param("from") java.time.LocalDateTime from,
+            @Param("to") java.time.LocalDateTime to);
+
+    @Query("""
+        SELECT FUNCTION('DATE_TRUNC', 'month', o.createdAt) AS period,
+               COALESCE(SUM(o.totalAmount), 0) AS revenue
+        FROM Order o
+        WHERE o.createdAt >= :from
+          AND o.createdAt < :to
+          AND o.status NOT IN (com.example.B2C.modules.order.entity.OrderStatus.CANCELLED,
+                               com.example.B2C.modules.order.entity.OrderStatus.RETURNED)
+        GROUP BY FUNCTION('DATE_TRUNC', 'month', o.createdAt)
+        ORDER BY period ASC
+        """)
+    java.util.List<Object[]> revenueByMonthForAdmin(
+            @Param("from") java.time.LocalDateTime from,
+            @Param("to") java.time.LocalDateTime to);
+
+    @Query("""
+        SELECT o.status, COUNT(o)
+        FROM Order o
+        GROUP BY o.status
+        """)
+    java.util.List<Object[]> countByStatus();
+
+    @Query(value = """
+        SELECT o.sellerId, SUM(o.totalAmount) AS revenue, COUNT(o) AS cnt
+        FROM Order o
+        WHERE o.status IN (com.example.B2C.modules.order.entity.OrderStatus.COMPLETED,
+                           com.example.B2C.modules.order.entity.OrderStatus.DELIVERED,
+                           com.example.B2C.modules.order.entity.OrderStatus.SHIPPING,
+                           com.example.B2C.modules.order.entity.OrderStatus.PACKED,
+                           com.example.B2C.modules.order.entity.OrderStatus.CONFIRMED)
+        GROUP BY o.sellerId
+        ORDER BY revenue DESC
+        """)
+    java.util.List<Object[]> topSellersByRevenue(org.springframework.data.domain.Pageable pageable);
 }

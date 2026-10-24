@@ -43,12 +43,32 @@ public class IdempotencyService {
     }
 
     /**
-     * Execute the supplier once per (scope, key). If a DONE record exists with the same
-     * request hash, replay the stored payload. If a DONE record exists with a different
-     * hash, throw IdempotencyConflictException. If IN_PROGRESS, throw immediately.
+     * Backward-compatible overload. Replays the response into a {@code Map} (i.e.
+     * {@code Object.class}). Use {@link #executeOrReplay(String, String, String,
+     * Class, Supplier)} when you need a concrete DTO type on the replay path.
+     */
+    @SuppressWarnings("unchecked")
+    public <T> T executeOrReplay(String scope, String key, String requestHash, Supplier<T> supplier) {
+        return (T) executeOrReplay(scope, key, requestHash, Object.class, (Supplier<Object>) supplier);
+    }
+
+    /**
+     * Execute the supplier once per (scope, key).
+     * <ul>
+     *   <li>If a DONE record exists with the same request hash, the stored payload
+     *       is deserialized into {@code type} and returned without invoking the
+     *       supplier (replay path).</li>
+     *   <li>If a DONE record exists with a different hash,
+     *       {@link IdempotencyConflictException} is thrown.</li>
+     *   <li>If IN_PROGRESS, the conflict is surfaced immediately.</li>
+     *   <li>If FAILED, the record is reset and the supplier is re-invoked.</li>
+     * </ul>
+     * Runs in its own transaction ({@code REQUIRES_NEW}) so the result and the
+     * record commit together regardless of the caller's transaction state.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public <T> T executeOrReplay(String scope, String key, String requestHash, Supplier<T> supplier) {
+    public <T> T executeOrReplay(String scope, String key, String requestHash,
+                                 Class<T> type, Supplier<T> supplier) {
         if (key == null || key.isBlank()) {
             return supplier.get();
         }
@@ -60,8 +80,9 @@ public class IdempotencyService {
                     throw new IdempotencyConflictException(
                             "Idempotency key '" + key + "' was used with a different request body");
                 }
-                log.info("Replaying idempotent response for scope={} key={}", scope, key);
-                return deserialize(rec.getResponsePayload(), supplier);
+                log.info("Replaying idempotent response for scope={} key={} as {}",
+                        scope, key, type.getSimpleName());
+                return deserialize(rec.getResponsePayload(), type);
             }
             if (rec.getStatus() == IdempotencyStatus.IN_PROGRESS) {
                 throw new IdempotencyConflictException(
@@ -114,20 +135,20 @@ public class IdempotencyService {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private <T> T deserialize(String payload, Supplier<T> supplier) {
-        try {
-            Class<?> targetType = inferType(supplier);
-            return (T) objectMapper.readValue(payload, targetType);
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to deserialize idempotent response", e);
+    private <T> T deserialize(String payload, Class<T> type) {
+        if (payload == null) {
+            throw new IllegalStateException("Idempotency record has no response payload to replay");
         }
-    }
-
-    private <T> Class<?> inferType(Supplier<T> supplier) {
-        // Best-effort: serialize a default instance would require a sample. As fallback we
-        // return Object.class, in which case the caller is expected to handle a Map. In our
-        // usage we serialize OrderDetailDto / PaymentDto so Object.class is acceptable.
-        return Object.class;
+        try {
+            if (type == Object.class) {
+                @SuppressWarnings("unchecked")
+                T cast = (T) objectMapper.readValue(payload, Object.class);
+                return cast;
+            }
+            return objectMapper.readValue(payload, type);
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "Failed to deserialize idempotent response into " + type.getName(), e);
+        }
     }
 }

@@ -50,6 +50,7 @@ public class Review extends BaseEntity {
     @Column(name = "comment", columnDefinition = "TEXT")
     private String comment;
 
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     @Column(name = "image_urls", columnDefinition = "jsonb")
     private String imageUrls;
 

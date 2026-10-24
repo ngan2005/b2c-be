@@ -6,6 +6,7 @@ import com.example.B2C.common.security.CurrentUserProvider;
 import com.example.B2C.modules.order.dto.CreateOrderRequest;
 import com.example.B2C.modules.order.dto.OrderDetailDto;
 import com.example.B2C.modules.order.dto.OrderSummaryDto;
+import com.example.B2C.modules.order.dto.ReturnRequestDto;
 import com.example.B2C.modules.order.entity.OrderStatus;
 import com.example.B2C.modules.order.service.OrderService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -48,6 +49,24 @@ public class BuyerOrderController {
                 orderService.listOrdersForCurrentBuyer(userId, status, page, size)));
     }
 
+    /**
+     * Read-only order history — accessible to BUYER and SELLER.
+     * Returns orders where the authenticated user is buyer_id.
+     * SELLER role holders can use this to view orders they placed before upgrading.
+     */
+    @GetMapping("/history")
+    @Operation(summary = "Read-only order history — accessible to BUYER and SELLER",
+               description = "Returns orders where the authenticated user is buyer_id. " +
+                             "SELLER role holders can use this to view orders they placed before upgrading.")
+    public ResponseEntity<ApiResponse<PageResponse<OrderSummaryDto>>> history(
+            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false, defaultValue = "0") int page,
+            @RequestParam(required = false, defaultValue = "20") int size) {
+        Long userId = currentUserProvider.getCurrentUserId();
+        return ResponseEntity.ok(ApiResponse.success(
+                orderService.listHistoricalBuyerOrders(userId, status, page, size)));
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "Get one of my orders by id")
     public ResponseEntity<ApiResponse<OrderDetailDto>> get(@PathVariable Long id) {
@@ -63,5 +82,15 @@ public class BuyerOrderController {
         Long userId = currentUserProvider.getCurrentUserId();
         return ResponseEntity.ok(ApiResponse.success("Order cancelled",
                 orderService.cancelOrderForBuyer(userId, id, reason)));
+    }
+
+    @PostMapping("/{id}/return-request")
+    @Operation(summary = "Request a return for a delivered order (within 7 days of delivery)")
+    public ResponseEntity<ApiResponse<OrderDetailDto>> requestReturn(
+            @PathVariable Long id,
+            @Valid @RequestBody ReturnRequestDto request) {
+        Long userId = currentUserProvider.getCurrentUserId();
+        return ResponseEntity.ok(ApiResponse.success("Return requested",
+                orderService.requestReturn(userId, id, request)));
     }
 }

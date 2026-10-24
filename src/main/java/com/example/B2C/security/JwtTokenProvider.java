@@ -83,14 +83,15 @@ public class JwtTokenProvider {
         }
     }
 
-    public boolean isTokenValid(String token, String username) {
-        try {
-            final String tokenUsername = extractUsername(token);
-            return (tokenUsername.equals(username)) && !isTokenExpired(token);
-        } catch (JwtException | IllegalArgumentException e) {
-            return false;
-        }
+public boolean isTokenValid(String token, String username) {
+    if (token == null || username == null) return false;
+    try {
+        final String tokenUsername = extractUsername(token);
+        return tokenUsername.equals(username) && !isTokenExpired(token);
+    } catch (JwtException | IllegalArgumentException e) {
+        return false;
     }
+}
 
     private boolean isTokenExpired(String token) {
         return extractExpiration(token).before(new Date());

@@ -9,7 +9,13 @@ public enum ErrorCode {
     USER_ALREADY_SELLER("User already has a seller profile", 409),
     INVALID_SELLER_APPLICATION_STATUS("Invalid seller application status for this operation", 400),
     REJECTION_REASON_REQUIRED("Rejection reason is required when rejecting an application", 400),
-    BUYER_ROLE_REQUIRED("Only a user with the BUYER role can submit a seller application", 403);
+    BUYER_ROLE_REQUIRED("Only a user with the BUYER role can submit a seller application", 403),
+    STORAGE_UNAVAILABLE("Image storage is not configured for this environment", 503),
+    ORDER_NOT_RETURNABLE("Order cannot be returned in its current status", 400),
+    RETURN_WINDOW_EXPIRED("The 7-day return window has expired for this order", 400),
+    RETURN_ALREADY_REQUESTED("A return request has already been submitted for this order", 409),
+    RETURN_ALREADY_PROCESSED("This return request has already been processed", 409),
+    PAYOUT_ALREADY_PAID("This payout has already been marked as paid", 409);
 
     private final String message;
     private final int httpStatus;

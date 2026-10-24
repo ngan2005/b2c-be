@@ -1,6 +1,7 @@
 package com.example.B2C.modules.catalog.service;
 
 import com.example.B2C.common.response.PageResponse;
+import com.example.B2C.modules.catalog.dto.AdminProductSummaryDto;
 import com.example.B2C.modules.catalog.dto.CreateProductRequest;
 import com.example.B2C.modules.catalog.dto.ProductDetailDto;
 import com.example.B2C.modules.catalog.dto.ProductSearchRequest;
@@ -33,5 +34,16 @@ public interface ProductService {
 
     void deleteProductForSeller(Long sellerId, Long productId);
 
+    ProductDetailDto restoreProductForSeller(Long sellerId, Long productId);
+
     ProductDetailDto updateProductStatusForSeller(Long sellerId, Long productId, ProductStatus status);
+
+    // ----- Admin-only -----
+
+    PageResponse<AdminProductSummaryDto> listProductsForAdmin(ProductStatus status, Long sellerId,
+                                                               String keyword, int page, int size);
+
+    ProductDetailDto getProductForAdmin(Long productId);
+
+    ProductDetailDto updateProductStatusForAdmin(Long productId, ProductStatus status);
 }

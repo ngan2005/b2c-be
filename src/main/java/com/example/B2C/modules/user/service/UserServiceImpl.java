@@ -4,6 +4,9 @@ import com.example.B2C.common.exception.BadRequestException;
 import com.example.B2C.common.exception.ConflictException;
 import com.example.B2C.common.exception.ResourceNotFoundException;
 import com.example.B2C.common.response.PageResponse;
+import com.example.B2C.common.storage.StoragePort;
+import com.example.B2C.common.storage.StoredAsset;
+import com.example.B2C.modules.user.dto.AvatarUploadResponse;
 import com.example.B2C.modules.user.dto.ChangePasswordRequest;
 import com.example.B2C.modules.user.dto.UpdateProfileRequest;
 import com.example.B2C.modules.user.dto.UserProfileDto;
@@ -21,6 +24,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -33,6 +37,8 @@ public class UserServiceImpl implements UserService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
+    private final StoragePort storagePort;
+    private final com.example.B2C.realtime.UserPresenceService userPresenceService;
 
     @Override
     @Transactional(readOnly = true)
@@ -80,6 +86,48 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
+    public AvatarUploadResponse uploadAvatar(Long userId, MultipartFile file) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+
+        // Purpose scopes the asset inside the storage bucket so user avatars
+        // stay grouped and are easy to audit.
+        String purpose = "users/" + userId + "/avatar";
+        StoredAsset asset = storagePort.upload(file, purpose);
+
+        // Remember the previous asset so it can be destroyed after the new one
+        // is in place. Deleting it before the upload would leave the user
+        // without an avatar if the upload failed.
+        String previousPublicId = user.getAvatarPublicId();
+
+        user.setAvatarUrl(asset.getSecureUrl());
+        user.setAvatarPublicId(asset.getPublicId());
+        userRepository.save(user);
+
+        if (previousPublicId != null && !previousPublicId.equals(asset.getPublicId())) {
+            try {
+                storagePort.delete(previousPublicId);
+            } catch (RuntimeException ex) {
+                // Never fail the request because cleanup failed — the new
+                // avatar is already live. The orphan can be GC'd later.
+                log.warn("Could not delete previous user avatar (public_id={}): {}",
+                        previousPublicId, ex.getMessage());
+            }
+        }
+
+        log.info("User {} updated avatar (public_id={}, {} bytes)",
+                userId, asset.getPublicId(), asset.getBytes());
+
+        return AvatarUploadResponse.builder()
+                .avatarUrl(asset.getSecureUrl())
+                .avatarPublicId(asset.getPublicId())
+                .format(asset.getFormat())
+                .bytes(asset.getBytes())
+                .build();
+    }
+
+    @Override
+    @Transactional
     public void changePassword(Long userId, ChangePasswordRequest request) {
         if (!request.getNewPassword().equals(request.getConfirmPassword())) {
             throw new BadRequestException("New password and confirmation do not match");
@@ -107,13 +155,18 @@ public class UserServiceImpl implements UserService {
     @Transactional(readOnly = true)
     public PageResponse<UserProfileDto> listUsersForAdmin(UserStatus status, String roleCode, String keyword,
                                                           int page, int size) {
+        String statusStr = (status == null) ? null : status.name();
         String trimmed = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
         String role = (roleCode == null || roleCode.isBlank()) ? null : roleCode.trim().toUpperCase();
         int p = Math.max(page, 0);
         int s = clampSize(size);
-        Pageable pageable = PageRequest.of(p, s, Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<User> users = userRepository.searchUsers(status, role, trimmed, pageable);
-        return PageResponse.of(users.map(UserProfileDto::from));
+        Pageable pageable = PageRequest.of(p, s);
+        Page<User> users = userRepository.searchUsers(statusStr, role, trimmed, pageable);
+        return PageResponse.of(users.map(u -> {
+            UserProfileDto dto = UserProfileDto.from(u);
+            dto.setIsOnline(userPresenceService.isUserOnline(u.getId()));
+            return dto;
+        }));
     }
 
     @Override
@@ -121,7 +174,14 @@ public class UserServiceImpl implements UserService {
     public UserProfileDto getUserForAdmin(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", userId));
-        return UserProfileDto.from(user);
+        UserProfileDto dto = UserProfileDto.from(user);
+        dto.setIsOnline(userPresenceService.isUserOnline(user.getId()));
+        return dto;
+    }
+
+    @Override
+    public Set<Long> getOnlineUserIds() {
+        return userPresenceService.getOnlineUserIds();
     }
 
     @Override

@@ -19,11 +19,12 @@ public class OrderStateMachine {
             OrderStatus.PENDING,   Set.of(OrderStatus.CONFIRMED, OrderStatus.CANCELLED),
             OrderStatus.CONFIRMED, Set.of(OrderStatus.PACKED, OrderStatus.CANCELLED),
             OrderStatus.PACKED,    Set.of(OrderStatus.SHIPPING, OrderStatus.CANCELLED),
-            OrderStatus.SHIPPING,  Set.of(OrderStatus.DELIVERED, OrderStatus.RETURNED),
-            OrderStatus.DELIVERED, Set.of(OrderStatus.COMPLETED, OrderStatus.RETURNED),
-            OrderStatus.COMPLETED, Set.of(),
-            OrderStatus.CANCELLED, Set.of(),
-            OrderStatus.RETURNED,  Set.of()
+            OrderStatus.SHIPPING,   Set.of(OrderStatus.DELIVERED),
+            OrderStatus.DELIVERED, Set.of(OrderStatus.COMPLETED, OrderStatus.RETURN_REQUESTED),
+            OrderStatus.RETURN_REQUESTED, Set.of(OrderStatus.RETURNED, OrderStatus.DELIVERED),
+            OrderStatus.COMPLETED,  Set.of(),
+            OrderStatus.CANCELLED,  Set.of(),
+            OrderStatus.RETURNED,   Set.of()
     );
 
     public void transition(Order order, OrderStatus target) {

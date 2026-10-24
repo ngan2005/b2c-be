@@ -25,28 +25,38 @@ import java.util.Map;
 public class JwtHandshakeInterceptor implements HandshakeInterceptor {
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final com.example.B2C.modules.user.repository.UserRepository userRepository;
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                    WebSocketHandler wsHandler, Map<String, Object> attributes) {
         String token = extractToken(request);
         if (token == null) {
-            // Allow anonymous handshake; the actual subscription can still be denied later.
+            // Allow anonymous handshake; subscription will be validated if needed.
             return true;
         }
         try {
             String username = jwtTokenProvider.extractUsername(token);
-            if (jwtTokenProvider.isTokenValid(token, username)) {
-                attributes.put("userId", jwtTokenProvider.extractUserId(token));
-                attributes.put("username", username);
-                // Establish a Spring Security context so that @PreAuthorize in
-                // controllers receiving STOMP messages can read the principal.
+            if (username != null && jwtTokenProvider.isTokenValid(token, username)) {
+                Long userId = jwtTokenProvider.extractUserId(token);
+                if (userId == null) {
+                    userId = userRepository.findByEmail(username).map(com.example.B2C.modules.user.entity.User::getId).orElse(null);
+                }
+                if (attributes != null) {
+                    if (userId != null) {
+                        attributes.put("userId", userId);
+                    }
+                    attributes.put("username", username);
+                }
+                // Establish Spring Security context
                 UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                         username, null, java.util.List.of());
                 SecurityContextHolder.getContext().setAuthentication(auth);
             }
         } catch (JwtException ex) {
             log.debug("WS handshake JWT invalid: {}", ex.getMessage());
+        } catch (Exception ex) {
+            log.warn("WS handshake error: {}", ex.getMessage());
         }
         return true;
     }

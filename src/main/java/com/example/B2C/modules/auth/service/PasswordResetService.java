@@ -35,6 +35,7 @@ public class PasswordResetService {
     @Value("${application.security.password-reset.base-url:http://localhost:3000/reset-password}")
     private String baseUrl;
 
+    @Transactional
     public void forgotPassword(String rawEmail) {
         Optional<User> userOpt = userRepository.findByEmail(rawEmail.toLowerCase().trim());
         if (userOpt.isEmpty() || userOpt.get().getDeletedAt() != null) {

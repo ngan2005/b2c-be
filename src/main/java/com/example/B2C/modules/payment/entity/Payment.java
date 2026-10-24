@@ -8,6 +8,9 @@ import lombok.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 @Entity
 @Table(name = "payment")
 @Getter
@@ -55,6 +58,7 @@ public class Payment extends BaseEntity {
     @Column(name = "refund_amount", precision = 15, scale = 2)
     private BigDecimal refundAmount;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "gateway_response", columnDefinition = "jsonb")
     private String gatewayResponse;
 

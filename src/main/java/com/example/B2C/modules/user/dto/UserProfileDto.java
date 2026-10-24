@@ -3,6 +3,7 @@ package com.example.B2C.modules.user.dto;
 import com.example.B2C.modules.user.entity.Gender;
 import com.example.B2C.modules.user.entity.User;
 import com.example.B2C.modules.user.entity.UserStatus;
+import com.example.B2C.modules.user.util.UserRoleResolver;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -31,6 +32,7 @@ public class UserProfileDto {
     private LocalDateTime lastLoginAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private Boolean isOnline;
 
     public static UserProfileDto from(User user) {
         return UserProfileDto.builder()
@@ -41,7 +43,10 @@ public class UserProfileDto {
                 .avatarUrl(user.getAvatarUrl())
                 .gender(user.getGender())
                 .dateOfBirth(user.getDateOfBirth())
-                .role(user.getRole() != null ? user.getRole().getCode() : null)
+                // Read the highest role from user_roles (multi-role),
+                // not from the legacy single users.role_id column which
+                // some promotion paths forgot to update.
+                .role(UserRoleResolver.getHighestRoleCode(user))
                 .status(user.getStatus())
                 .emailVerifiedAt(user.getEmailVerifiedAt())
                 .phoneVerifiedAt(user.getPhoneVerifiedAt())
