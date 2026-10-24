@@ -10,6 +10,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -43,5 +45,18 @@ public class InventoryStrategyConfig {
                     + ". Expected one of E0, E1, E2, E3.");
         }
         return strategy;
+    }
+
+    /**
+     * Programmatic transaction helper used by {@link com.example.B2C.modules.inventory.service.LoadTestRunner}
+     * so each worker thread can start its own DB transaction independently of
+     * the caller's. Required because the runExperiment pool spawns fresh threads
+     * that do not inherit the outer @Transactional context.
+     */
+    @Bean
+    public TransactionTemplate loadTestTransactionTemplate(PlatformTransactionManager txManager) {
+        TransactionTemplate template = new TransactionTemplate(txManager);
+        template.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return template;
     }
 }

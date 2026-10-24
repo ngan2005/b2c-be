@@ -35,15 +35,20 @@ public class E3OptimisticRetryStrategy implements InventoryStrategy {
     }
 
     @Override
-    public void reserve(ProductVariant variant, int qty, Long orderId) {
+    public ProductVariantRepository repository() {
+        return repository;
+    }
+
+    @Override
+    public void reserve(Long variantId, int qty, Long orderId) {
         ObjectOptimisticLockingFailureException lastEx = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                ProductVariant fresh = repository.findById(variant.getId())
+                ProductVariant fresh = repository.findById(variantId)
                         .orElseThrow(() -> new OutOfStockException(
-                                "Variant " + variant.getId() + " not found"));
+                                "Variant " + variantId + " not found"));
                 if (fresh.getStockQuantity() < qty) {
-                    throw new OutOfStockException("Insufficient stock for variant " + fresh.getId());
+                    throw new OutOfStockException("Insufficient stock for variant " + variantId);
                 }
                 fresh.setStockQuantity(fresh.getStockQuantity() - qty);
                 fresh.setReservedQuantity(
@@ -54,14 +59,14 @@ public class E3OptimisticRetryStrategy implements InventoryStrategy {
             } catch (ObjectOptimisticLockingFailureException ex) {
                 lastEx = ex;
                 log.debug("Optimistic conflict on variant {} attempt {}/{}",
-                        variant.getId(), attempt, maxAttempts);
+                        variantId, attempt, maxAttempts);
                 if (attempt < maxAttempts) {
                     sleep(backoffMs * attempt);
                 }
             }
         }
         throw lastEx != null ? lastEx
-                : new OutOfStockException("Failed to reserve variant " + variant.getId());
+                : new OutOfStockException("Failed to reserve variant " + variantId);
     }
 
     private void sleep(long ms) {

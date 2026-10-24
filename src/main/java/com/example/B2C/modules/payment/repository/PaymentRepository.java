@@ -13,5 +13,7 @@ public interface PaymentRepository extends BaseRepository<Payment, Long> {
 
     Optional<Payment> findByOrderIdAndTransactionId(Long orderId, String transactionId);
 
+    Optional<Payment> findByTransactionId(String transactionId);
+
     List<Payment> findByStatus(PaymentTransactionStatus status);
 }

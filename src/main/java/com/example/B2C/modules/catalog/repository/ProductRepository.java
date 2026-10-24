@@ -20,9 +20,8 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
     boolean existsBySlug(String slug);
 
     /**
-     * Search products without a keyword. Splitting this from the keyword search avoids
-     * PostgreSQL casting {@code NULL} parameters to {@code bytea} when running
-     * {@code LOWER(field) LIKE LOWER(CONCAT('%', :keyword, '%'))}.
+     * Filter-only search: no keyword, just category/seller/price/status filters.
+     * No FTS involved — pure indexed lookups.
      */
     @Query("""
         SELECT p FROM Product p
@@ -43,29 +42,105 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
     );
 
     /**
-     * Search products with a keyword. Only invoked when keyword is non-null and non-blank.
+     * Full-text search on products via tsvector.
+     *
+     * Uses websearch_to_tsquery so the caller can pass plain words (ANDed),
+     * quoted phrases (exact match), -exclusion, or bare words (ORed in websearch mode).
+     * The trigram index on name/description acts as a secondary plan for very short
+     * queries (&lt; 2 chars) where websearch_to_tsquery has no result.
+     *
+     * @param status     product status filter
+     * @param categoryId optional category filter
+     * @param sellerId   optional seller filter
+     * @param minPrice   optional min price
+     * @param maxPrice   optional max price
+     * @param q          raw search string — passed verbatim to websearch_to_tsquery
+     * @param pageable   pagination
+     * @return matching products ordered by relevance then recency
      */
-    @Query("""
-        SELECT p FROM Product p
-        WHERE p.deletedAt IS NULL
+    @Query(value = """
+        SELECT p.* FROM product p
+        WHERE p.deleted_at IS NULL
           AND p.status = :status
-          AND (:categoryId IS NULL OR p.category.id = :categoryId)
-          AND (:sellerId IS NULL OR p.seller.id = :sellerId)
-          AND (:minPrice IS NULL OR p.minPrice >= :minPrice)
-          AND (:maxPrice IS NULL OR p.maxPrice <= :maxPrice)
+          AND (:categoryId IS NULL OR p.category_id = :categoryId)
+          AND (:sellerId IS NULL OR p.seller_id = :sellerId)
+          AND (:minPrice IS NULL OR p.min_price >= :minPrice)
+          AND (:maxPrice IS NULL OR p.max_price <= :maxPrice)
           AND (
-            LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
-            OR LOWER(CAST(p.description AS string)) LIKE LOWER(CONCAT('%', :keyword, '%'))
-            OR LOWER(p.brand) LIKE LOWER(CONCAT('%', :keyword, '%'))
+            p.search_vector @@ websearch_to_tsquery('simple', public.immutable_unaccent(:q))
+            OR (:q_len < 2 AND (
+                p.name ILIKE '%' || :q || '%'
+                OR p.description ILIKE '%' || :q || '%'
+            ))
+          )
+        ORDER BY
+          ts_rank(p.search_vector, websearch_to_tsquery('simple', public.immutable_unaccent(:q))) DESC,
+          p.created_at DESC
+        """, nativeQuery = true,
+        countQuery = """
+        SELECT count(p.id) FROM product p
+        WHERE p.deleted_at IS NULL
+          AND p.status = :status
+          AND (:categoryId IS NULL OR p.category_id = :categoryId)
+          AND (:sellerId IS NULL OR p.seller_id = :sellerId)
+          AND (:minPrice IS NULL OR p.min_price >= :minPrice)
+          AND (:maxPrice IS NULL OR p.max_price <= :maxPrice)
+          AND (
+            p.search_vector @@ websearch_to_tsquery('simple', public.immutable_unaccent(:q))
+            OR (:q_len < 2 AND (
+                p.name ILIKE '%' || :q || '%'
+                OR p.description ILIKE '%' || :q || '%'
+            ))
           )
         """)
-    Page<Product> searchProductsWithKeyword(
-            @Param("status") ProductStatus status,
+    Page<Product> searchProductsFulltext(
+            @Param("status") String status,
             @Param("categoryId") Long categoryId,
             @Param("sellerId") Long sellerId,
             @Param("minPrice") BigDecimal minPrice,
             @Param("maxPrice") BigDecimal maxPrice,
-            @Param("keyword") String keyword,
+            @Param("q") String q,
+            @Param("q_len") int qLen,
+            Pageable pageable
+    );
+
+    /**
+     * Seller-side full-text search.
+     */
+    @Query(value = """
+        SELECT p.* FROM product p
+        WHERE p.deleted_at IS NULL
+          AND p.seller_id = :sellerId
+          AND (:status IS NULL OR p.status = :status)
+          AND (
+            p.search_vector @@ websearch_to_tsquery('simple', public.immutable_unaccent(:q))
+            OR (:q_len < 2 AND (
+                p.name ILIKE '%' || :q || '%'
+                OR p.description ILIKE '%' || :q || '%'
+            ))
+          )
+        ORDER BY
+          ts_rank(p.search_vector, websearch_to_tsquery('simple', public.immutable_unaccent(:q))) DESC,
+          p.created_at DESC
+        """, nativeQuery = true,
+        countQuery = """
+        SELECT count(p.id) FROM product p
+        WHERE p.deleted_at IS NULL
+          AND p.seller_id = :sellerId
+          AND (:status IS NULL OR p.status = :status)
+          AND (
+            p.search_vector @@ websearch_to_tsquery('simple', public.immutable_unaccent(:q))
+            OR (:q_len < 2 AND (
+                p.name ILIKE '%' || :q || '%'
+                OR p.description ILIKE '%' || :q || '%'
+            ))
+          )
+        """)
+    Page<Product> searchProductsSellerFulltext(
+            @Param("sellerId") Long sellerId,
+            @Param("status") String status,
+            @Param("q") String q,
+            @Param("q_len") int qLen,
             Pageable pageable
     );
 
@@ -86,24 +161,17 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
     Page<Product> findActiveBySeller(@Param("sellerId") Long sellerId, Pageable pageable);
 
     /**
-     * Seller-side listing: filter by status (optional) and keyword (optional),
-     * restricted to a single seller. Used by the seller dashboard.
+     * Seller-side listing without a keyword. No changes here — no LIKE involved.
      */
     @Query("""
         SELECT p FROM Product p
         WHERE p.deletedAt IS NULL
           AND p.seller = :seller
           AND (:status IS NULL OR p.status = :status)
-          AND (
-            :keyword IS NULL
-            OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
-            OR LOWER(CAST(p.description AS string)) LIKE LOWER(CONCAT('%', :keyword, '%'))
-          )
         """)
-    Page<Product> findAllBySeller(
+    Page<Product> findAllBySellerWithoutKeyword(
             @Param("seller") com.example.B2C.modules.seller.entity.Seller seller,
             @Param("status") ProductStatus status,
-            @Param("keyword") String keyword,
             Pageable pageable
     );
 
@@ -114,4 +182,11 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
     long countByStatusAndDeletedAtIsNull(ProductStatus status);
 
     long countByDeletedAtIsNull();
+
+    @Query("""
+        SELECT p FROM Product p
+        WHERE p.deletedAt IS NULL
+        ORDER BY p.createdAt DESC
+        """)
+    org.springframework.data.domain.Page<Product> findAllDeletedAtIsNull(org.springframework.data.domain.Pageable pageable);
 }

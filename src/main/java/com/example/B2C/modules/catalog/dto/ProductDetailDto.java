@@ -24,7 +24,12 @@ public class ProductDetailDto {
     private Long sellerId;
     private String shopName;
     private String shopSlug;
+    private String shopLogoUrl;
     private BigDecimal sellerRatingAvg;
+    private Integer shopRatingCount;
+    private Integer shopProductCount;
+    private LocalDateTime shopCreatedAt;
+    private Boolean shopIsOnline;
 
     private Long categoryId;
     private String categoryName;

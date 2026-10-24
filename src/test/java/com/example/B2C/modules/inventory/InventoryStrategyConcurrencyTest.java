@@ -27,7 +27,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -42,12 +41,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Validates that the inventory strategies behave correctly under concurrent load.
- * The H2 mock profile is used; pessimistic lock tests will pass on H2 because Spring
- * routes {@code LockModeType.PESSIMISTIC_WRITE} to {@code SELECT ... FOR UPDATE}
- * which H2 supports in PostgreSQL compatibility mode.
  */
 @SpringBootTest
-@ActiveProfiles({"db-test"})
+@Transactional
 class InventoryStrategyConcurrencyTest {
 
     @Autowired private ProductVariantRepository variantRepository;
@@ -198,7 +194,7 @@ class InventoryStrategyConcurrencyTest {
         v.setStockQuantity(0);
         variantRepository.saveAndFlush(v);
         assertThrows(OutOfStockException.class,
-                () -> e1.reserve(v, 1, 1L));
+                () -> e1.reserve(variantId, 1, 1L));
     }
 
     private void runRace(InventoryStrategy strategy, int concurrency, int qty) throws Exception {
@@ -212,8 +208,7 @@ class InventoryStrategyConcurrencyTest {
             pool.submit(() -> {
                 try {
                     start.await();
-                    ProductVariant v = variantRepository.findById(variantId).orElseThrow();
-                    strategy.reserve(v, qty, null);
+                    strategy.reserve(variantId, qty, null);
                     success.incrementAndGet();
                 } catch (OutOfStockException ex) {
                     failed.incrementAndGet();

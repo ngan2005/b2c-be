@@ -20,4 +20,10 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UserRoleId> 
     List<UserRole> findByUserIdWithRole(@Param("userId") Long userId);
 
     boolean existsByUserIdAndRoleId(Long userId, Long roleId);
+
+    /**
+     * Deletes a single row from the user_roles join table.
+     * Returns the number of rows removed (0 or 1).
+     */
+    long deleteByUserIdAndRoleId(Long userId, Long roleId);
 }

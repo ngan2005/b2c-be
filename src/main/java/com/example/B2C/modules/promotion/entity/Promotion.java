@@ -71,4 +71,13 @@ public class Promotion extends BaseEntity {
     @Column(name = "status", nullable = false, length = 20)
     @Builder.Default
     private PromotionStatus status = PromotionStatus.ACTIVE;
+
+    /**
+     * Soft-delete marker. Null while the promotion is live. When set, the
+     * row is hidden from admin/seller listings but kept so the admin UI can
+     * offer a short "undo" action right after deletion. Hard-delete is
+     * performed by a separate cleanup job after the undo window expires.
+     */
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
 }

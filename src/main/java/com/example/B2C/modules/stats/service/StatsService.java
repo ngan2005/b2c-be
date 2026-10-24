@@ -12,9 +12,8 @@ import com.example.B2C.modules.seller.entity.SellerApplicationStatus;
 import com.example.B2C.modules.seller.entity.SellerStatus;
 import com.example.B2C.modules.seller.repository.SellerApplicationRepository;
 import com.example.B2C.modules.seller.repository.SellerRepository;
-import com.example.B2C.modules.stats.dto.AdminStatsResponse;
-import com.example.B2C.modules.stats.dto.RevenuePoint;
-import com.example.B2C.modules.stats.dto.SellerStatsResponse;
+import com.example.B2C.modules.stats.dto.*;
+import com.example.B2C.modules.catalog.entity.ProductVariant;
 import com.example.B2C.modules.user.entity.UserStatus;
 import com.example.B2C.modules.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -129,6 +128,71 @@ public class StatsService {
                 .build();
     }
 
+    // ===================== Admin stats =====================
+
+    public List<AdminRevenuePoint> getAdminRevenue(LocalDateTime from, LocalDateTime to, String granularity) {
+        LocalDateTime safeFrom = from != null ? from : LocalDateTime.now().minusDays(30);
+        LocalDateTime safeTo = to != null ? to : LocalDateTime.now();
+
+        List<Object[]> rows;
+        String gran = (granularity != null) ? granularity.toLowerCase() : "day";
+        if ("week".equals(gran)) {
+            rows = orderRepository.revenueByWeekForAdmin(safeFrom, safeTo);
+        } else if ("month".equals(gran)) {
+            rows = orderRepository.revenueByMonthForAdmin(safeFrom, safeTo);
+        } else {
+            rows = orderRepository.revenueByDayForAdmin(safeFrom, safeTo);
+        }
+
+        return rows.stream().map(row -> AdminRevenuePoint.builder()
+                .date(toLocalDate(row[0]))
+                .revenue(toBigDecimal(row[1]))
+                .build()).toList();
+    }
+
+    public List<OrderFunnelPoint> getOrderFunnel() {
+        List<Object[]> rows = orderRepository.countByStatus();
+        return rows.stream().map(row -> OrderFunnelPoint.builder()
+                .status(row[0] != null ? row[0].toString() : "UNKNOWN")
+                .count(toLong(row[1]))
+                .build()).toList();
+    }
+
+    public List<TopSellerPoint> getTopSellers(int limit) {
+        var pageable = org.springframework.data.domain.PageRequest.of(0, limit);
+        List<Object[]> rows = orderRepository.topSellersByRevenue(pageable);
+        return rows.stream().map(row -> {
+            Long sellerId = toLong(row[0]);
+            String shopName = null;
+            if (sellerId != null) {
+                shopName = sellerRepository.findById(sellerId)
+                        .map(Seller::getShopName)
+                        .orElse(null);
+            }
+            return TopSellerPoint.builder()
+                    .sellerId(sellerId)
+                    .shopName(shopName)
+                    .totalRevenue(toBigDecimal(row[1]))
+                    .orderCount(toLong(row[2]))
+                    .build();
+        }).toList();
+    }
+
+    public List<LowStockItem> getLowStock(int threshold) {
+        int safeThreshold = Math.max(0, threshold);
+        var pageable = org.springframework.data.domain.PageRequest.of(0, 200);
+        List<ProductVariant> variants = productVariantRepository
+                .findLowStockForAdmin(safeThreshold, ProductStatus.HIDDEN, pageable);
+        return variants.stream().map(v -> LowStockItem.builder()
+                .variantId(v.getId())
+                .sku(v.getSku())
+                .productId(v.getProduct() != null ? v.getProduct().getId() : null)
+                .productName(v.getProduct() != null ? v.getProduct().getName() : null)
+                .variantName(v.getVariantName())
+                .stockQuantity(v.getStockQuantity())
+                .build()).toList();
+    }
+
     private BigDecimal nullSafe(BigDecimal v) {
         return v == null ? BigDecimal.ZERO : v;
     }
@@ -146,5 +210,12 @@ public class StatsService {
         if (o instanceof Date d) return d.toLocalDate();
         if (o instanceof java.time.LocalDateTime dt) return dt.toLocalDate();
         return null;
+    }
+
+    private long toLong(Object o) {
+        if (o == null) return 0L;
+        if (o instanceof Long l) return l;
+        if (o instanceof Number n) return n.longValue();
+        return 0L;
     }
 }

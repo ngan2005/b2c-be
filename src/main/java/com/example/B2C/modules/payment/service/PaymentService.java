@@ -115,6 +115,87 @@ public class PaymentService {
         return toDto(payment);
     }
 
+    /**
+     * Confirms a payment using just the VNPay transaction reference (vnp_TxnRef).
+     * Used by the /return endpoint which only has the txnRef from VNPay, not the internal orderId.
+     *
+     * @param txnRef VNPay's transaction reference (stored as vnp_TxnRef, maps to our orderCode_txid)
+     * @param transactionNo VNPay's transaction number
+     * @param responseCode  VNPay response code; "00" means success
+     * @param idempotencyKey idempotency key for replay safety
+     * @return the resulting PaymentDto
+     */
+    @Transactional
+    public PaymentDto confirmPaymentByTxnRef(String txnRef, String transactionNo,
+                                            String responseCode, String idempotencyKey) {
+        var existing = paymentRepository.findByTransactionId(txnRef);
+        if (existing.isPresent()) {
+            Payment p = existing.get();
+            if (p.getStatus() == PaymentTransactionStatus.SUCCESS
+                    || p.getStatus() == PaymentTransactionStatus.FAILED) {
+                log.info("Replay VNPay callback for txnRef {} -> {}", txnRef, p.getStatus());
+                return toDto(p);
+            }
+        }
+
+        // Resolve order from the txnRef prefix (orderCode_txid format)
+        String orderCode = txnRef.contains("_")
+                ? txnRef.substring(0, txnRef.lastIndexOf('_'))
+                : txnRef;
+
+        var orderOpt = orderRepository.findByOrderCode(orderCode);
+        if (orderOpt.isEmpty()) {
+            log.warn("VNPay return: no order found for orderCode={} (txnRef={})", orderCode, txnRef);
+            throw new ResourceNotFoundException("Order", "orderCode: " + orderCode);
+        }
+        Order order = orderOpt.get();
+
+        Payment payment = existing.orElseGet(() -> Payment.builder()
+                .order(order)
+                .method(order.getPaymentMethod())
+                .provider("VNPAY")
+                .amount(order.getTotalAmount())
+                .build());
+        payment.setTransactionId(txnRef);
+        payment.setIdempotencyKey(idempotencyKey);
+        payment.setProvider("VNPAY");
+
+        boolean success = "00".equals(responseCode);
+
+        if (success) {
+            payment.setStatus(PaymentTransactionStatus.SUCCESS);
+            payment.setPaidAt(LocalDateTime.now());
+
+            for (OrderItem item : orderItemRepository.findByOrderId(order.getId())) {
+                inventoryPort.confirm(item.getVariantId(), item.getQuantity());
+            }
+
+            order.setPaymentStatus("PAID");
+            stateMachine.transition(order, OrderStatus.CONFIRMED);
+            orderRepository.save(order);
+            paymentRepository.save(payment);
+
+            eventPublisher.publishEvent(new OrderPaidEvent(this, order.getId(), order.getBuyerId(), order.getSellerId()));
+            log.info("VNPay payment SUCCESS for order {} txnRef {}", order.getOrderCode(), txnRef);
+        } else {
+            payment.setStatus(PaymentTransactionStatus.FAILED);
+            paymentRepository.save(payment);
+
+            for (OrderItem item : orderItemRepository.findByOrderId(order.getId())) {
+                inventoryPort.release(item.getVariantId(), item.getQuantity());
+            }
+            stateMachine.transition(order, OrderStatus.CANCELLED);
+            order.setCancelledAt(LocalDateTime.now());
+            order.setCancelReason("Payment failed (VNPay response code: " + responseCode + ")");
+            orderRepository.save(order);
+
+            eventPublisher.publishEvent(new OrderCancelledEvent(this, order.getId(), order.getBuyerId(),
+                    order.getSellerId(), "Payment failed"));
+            log.info("VNPay payment FAILED for order {} txnRef {} responseCode {}", order.getOrderCode(), txnRef, responseCode);
+        }
+        return toDto(payment);
+    }
+
     static PaymentDto toDto(Payment p) {
         return PaymentDto.builder()
                 .id(p.getId())

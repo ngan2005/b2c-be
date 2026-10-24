@@ -51,7 +51,22 @@ public class OrderDetailDto {
 
     private List<OrderItemDto> items;
 
+    /** VNPay redirect URL — set when paymentMethod = VNPAY and the payment URL was successfully generated. */
+    private String paymentUrl;
+
+    // Return-related fields
+    private String returnReason;
+    private String returnDescription;
+    private LocalDateTime returnRequestedAt;
+    private LocalDateTime returnApprovedAt;
+    private LocalDateTime returnRejectedAt;
+    private String returnAdminNote;
+
     public static OrderDetailDto from(Order order, List<OrderItem> items) {
+        return from(order, items, null);
+    }
+
+    public static OrderDetailDto from(Order order, List<OrderItem> items, String paymentUrl) {
         return OrderDetailDto.builder()
                 .id(order.getId())
                 .orderCode(order.getOrderCode())
@@ -78,6 +93,13 @@ public class OrderDetailDto {
                 .createdAt(order.getCreatedAt())
                 .updatedAt(order.getUpdatedAt())
                 .items(items.stream().map(OrderItemDto::from).collect(Collectors.toList()))
+                .paymentUrl(paymentUrl)
+                .returnReason(order.getReturnReason())
+                .returnDescription(order.getReturnDescription())
+                .returnRequestedAt(order.getReturnRequestedAt())
+                .returnApprovedAt(order.getReturnApprovedAt())
+                .returnRejectedAt(order.getReturnRejectedAt())
+                .returnAdminNote(order.getReturnAdminNote())
                 .build();
     }
 }

@@ -3,11 +3,16 @@
 build/
 !gradle/wrapper/gradle-wrapper.jar
 
-# Maven (project switched to Gradle; old Maven artifacts not used)
+# Maven / Build
+target/
 .mvn/
 mvnw
 mvnw.cmd
 pom.xml
+dotenv-extract/
+dotenv-sources/
+dotenv.jar
+login_body.json
 
 # Build output / wrapper extras
 bin/

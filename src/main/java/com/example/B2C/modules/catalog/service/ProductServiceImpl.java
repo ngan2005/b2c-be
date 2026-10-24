@@ -11,6 +11,7 @@ import com.example.B2C.modules.catalog.repository.*;
 import com.example.B2C.modules.seller.entity.Seller;
 import com.example.B2C.modules.seller.entity.SellerStatus;
 import com.example.B2C.modules.seller.repository.SellerRepository;
+import com.example.B2C.realtime.UserPresenceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -41,6 +42,7 @@ public class ProductServiceImpl implements ProductService {
     private final ProductOptionValueRepository productOptionValueRepository;
     private final CategoryRepository categoryRepository;
     private final SellerRepository sellerRepository;
+    private final UserPresenceService userPresenceService;
 
     private static final Map<String, String> SORT_FIELD_MAP = Map.of(
             "price", "minPrice",
@@ -74,13 +76,15 @@ public class ProductServiceImpl implements ProductService {
                     pageable
             );
         } else {
-            productPage = productRepository.searchProductsWithKeyword(
-                    ProductStatus.ACTIVE,
+            String trimmed = keyword.trim();
+            productPage = productRepository.searchProductsFulltext(
+                    ProductStatus.ACTIVE.name(),
                     request.getCategoryId(),
                     request.getSellerId(),
                     request.getMinPrice(),
                     request.getMaxPrice(),
-                    keyword.trim(),
+                    trimmed,
+                    trimmed.length(),
                     pageable
             );
         }
@@ -144,7 +148,9 @@ public class ProductServiceImpl implements ProductService {
                 Sort.by(Sort.Direction.DESC, "createdAt")
         );
         String trimmed = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
-        Page<Product> productPage = productRepository.findAllBySeller(seller, status, trimmed, pageable);
+        Page<Product> productPage = (trimmed == null)
+                ? productRepository.findAllBySellerWithoutKeyword(seller, status, pageable)
+                : productRepository.searchProductsSellerFulltext(seller.getId(), status != null ? status.name() : null, trimmed, trimmed.length(), pageable);
         return PageResponse.of(productPage.map(this::toSummaryDto));
     }
 
@@ -246,6 +252,28 @@ public class ProductServiceImpl implements ProductService {
             seller.setTotalProduct(seller.getTotalProduct() - 1);
             sellerRepository.save(seller);
         }
+    }
+
+    @Override
+    @Transactional
+    public ProductDetailDto restoreProductForSeller(Long sellerId, Long productId) {
+        Seller seller = getActiveSeller(sellerId);
+        // Only the seller that owns the product can restore it, and only if it
+        // is currently soft-deleted.
+        Product product = productRepository.findById(productId)
+                .filter(p -> p.getDeletedAt() != null)
+                .orElseThrow(() -> new ResourceNotFoundException("Product", "id: " + productId));
+        ensureOwnedBySeller(product, seller);
+
+        product.setDeletedAt(null);
+        // Keep HIDDEN as the safe default — the seller can re-activate
+        // through the status PATCH endpoint once they're ready.
+        productRepository.save(product);
+
+        seller.setTotalProduct((seller.getTotalProduct() == null ? 0 : seller.getTotalProduct()) + 1);
+        sellerRepository.save(seller);
+
+        return getProductForSeller(sellerId, productId);
     }
 
     @Override
@@ -354,16 +382,31 @@ public class ProductServiceImpl implements ProductService {
                     .build();
         }).collect(Collectors.toList());
 
+        Seller seller = product.getSeller();
+        Integer shopProductCount = null;
+        Boolean shopIsOnline = false;
+        if (seller != null) {
+            shopProductCount = (int) productRepository.countBySellerIdAndStatusAndDeletedAtIsNull(seller.getId(), ProductStatus.ACTIVE);
+            if (seller.getUser() != null && userPresenceService != null) {
+                shopIsOnline = userPresenceService.isUserOnline(seller.getUser().getId());
+            }
+        }
+
         return ProductDetailDto.builder()
                 .id(product.getId())
                 .slug(product.getSlug())
                 .name(product.getName())
                 .description(product.getDescription())
                 .brand(product.getBrand())
-                .sellerId(product.getSeller() != null ? product.getSeller().getId() : null)
-                .shopName(product.getSeller() != null ? product.getSeller().getShopName() : null)
-                .shopSlug(product.getSeller() != null ? product.getSeller().getSlug() : null)
-                .sellerRatingAvg(product.getSeller() != null ? product.getSeller().getRatingAvg() : null)
+                .sellerId(seller != null ? seller.getId() : null)
+                .shopName(seller != null ? seller.getShopName() : null)
+                .shopSlug(seller != null ? seller.getSlug() : null)
+                .shopLogoUrl(seller != null ? seller.getLogoUrl() : null)
+                .sellerRatingAvg(seller != null ? seller.getRatingAvg() : null)
+                .shopRatingCount(seller != null ? seller.getRatingCount() : null)
+                .shopProductCount(shopProductCount)
+                .shopCreatedAt(seller != null ? seller.getCreatedAt() : null)
+                .shopIsOnline(shopIsOnline)
                 .categoryId(product.getCategory() != null ? product.getCategory().getId() : null)
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .categorySlug(product.getCategory() != null ? product.getCategory().getSlug() : null)
@@ -421,6 +464,7 @@ public class ProductServiceImpl implements ProductService {
                 .shopName(product.getSeller() != null ? product.getSeller().getShopName() : null)
                 .categoryId(product.getCategory() != null ? product.getCategory().getId() : null)
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
+                .status(product.getStatus() != null ? product.getStatus().name() : "ACTIVE")
                 .createdAt(product.getCreatedAt())
                 .build();
     }
@@ -442,5 +486,72 @@ public class ProductServiceImpl implements ProductService {
         if (min != null && max != null && min.compareTo(max) > 0) {
             throw new BadRequestException("minPrice must be less than or equal to maxPrice");
         }
+    }
+
+    // ===================== Admin-only =====================
+
+    @Override
+    public PageResponse<AdminProductSummaryDto> listProductsForAdmin(ProductStatus status, Long sellerId,
+                                                                     String keyword, int page, int size) {
+        Pageable pageable = PageRequest.of(
+                Math.max(page, 0),
+                clampSize(size),
+                Sort.by(Sort.Direction.DESC, "createdAt")
+        );
+        String trimmed = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
+
+        org.springframework.data.domain.Page<Product> productPage;
+        if (status != null) {
+            if (trimmed == null) {
+                productPage = productRepository.searchProductsWithoutKeyword(
+                        status, null, sellerId, null, null, pageable);
+            } else {
+                productPage = productRepository.searchProductsFulltext(
+                        status.name(), null, sellerId, null, null, trimmed, trimmed.length(), pageable);
+            }
+        } else {
+            // No status filter — list all non-deleted products (no keyword FTS path needed)
+            productPage = productRepository.findAllDeletedAtIsNull(pageable);
+        }
+        return PageResponse.of(productPage.map(this::toAdminSummaryDto));
+    }
+
+    @Override
+    public ProductDetailDto getProductForAdmin(Long productId) {
+        Product product = productRepository.findByIdAndDeletedAtIsNull(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product", "id: " + productId));
+        return toDetailDto(product);
+    }
+
+    @Override
+    @Transactional
+    public ProductDetailDto updateProductStatusForAdmin(Long productId, ProductStatus status) {
+        Product product = productRepository.findByIdAndDeletedAtIsNull(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product", "id: " + productId));
+        product.setStatus(status);
+        Product saved = productRepository.save(product);
+        log.info("Admin updated product {} status to {}", productId, status);
+        return toDetailDto(saved);
+    }
+
+    private AdminProductSummaryDto toAdminSummaryDto(Product product) {
+        return AdminProductSummaryDto.builder()
+                .id(product.getId())
+                .slug(product.getSlug())
+                .name(product.getName())
+                .minPrice(product.getMinPrice())
+                .maxPrice(product.getMaxPrice())
+                .thumbnailUrl(product.getThumbnailUrl())
+                .brand(product.getBrand())
+                .ratingAvg(product.getRatingAvg())
+                .ratingCount(product.getRatingCount())
+                .soldCount(product.getSoldCount())
+                .sellerId(product.getSeller() != null ? product.getSeller().getId() : null)
+                .shopName(product.getSeller() != null ? product.getSeller().getShopName() : null)
+                .categoryId(product.getCategory() != null ? product.getCategory().getId() : null)
+                .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
+                .status(product.getStatus())
+                .createdAt(product.getCreatedAt())
+                .build();
     }
 }

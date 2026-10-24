@@ -37,6 +37,12 @@ public class AdminUserController {
         return ResponseEntity.ok(ApiResponse.success(userService.listUsersForAdmin(status, role, q, page, size)));
     }
 
+    @GetMapping("/online")
+    @Operation(summary = "Get IDs of currently online users")
+    public ResponseEntity<ApiResponse<java.util.Set<Long>>> getOnline() {
+        return ResponseEntity.ok(ApiResponse.success(userService.getOnlineUserIds()));
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "Get user detail")
     public ResponseEntity<ApiResponse<UserProfileDto>> get(@PathVariable Long id) {

@@ -28,5 +28,6 @@ public class ProductSummaryDto {
     private String shopName;
     private Long categoryId;
     private String categoryName;
+    private String status;
     private LocalDateTime createdAt;
 }

@@ -35,6 +35,16 @@ public class Seller extends BaseEntity {
     @Column(name = "logo_url", columnDefinition = "TEXT")
     private String logoUrl;
 
+    /**
+     * Cloudinary public_id of the uploaded shop avatar. Populated by
+     * {@code SellerServiceImpl} when the seller uploads a replacement
+     * logo, so the previous asset can be destroyed from the storage
+     * backend instead of being orphaned. Null for rows that pre-date
+     * this column or whose logo was set by other means.
+     */
+    @Column(name = "logo_public_id")
+    private String logoPublicId;
+
     @Column(name = "banner_url", columnDefinition = "TEXT")
     private String bannerUrl;
 

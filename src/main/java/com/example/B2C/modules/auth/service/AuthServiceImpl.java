@@ -16,6 +16,9 @@ import com.example.B2C.modules.user.entity.UserRole;
 import com.example.B2C.modules.user.entity.UserStatus;
 import com.example.B2C.modules.user.repository.RoleRepository;
 import com.example.B2C.modules.user.repository.UserRepository;
+import com.example.B2C.modules.user.repository.UserRoleRepository;
+import com.example.B2C.modules.user.util.UserRoleResolver;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -29,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuthServiceImpl implements AuthService {
 
     private final UserRepository userRepository;
+    private final UserRoleRepository userRoleRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
@@ -61,11 +65,16 @@ public class AuthServiceImpl implements AuthService {
 
         User savedUser = userRepository.save(newUser);
 
-        // Also persist the BUYER role in the user_roles join table
-        UserRole userRole = UserRole.builder()
+        // Persist the user_roles join row explicitly. The legacy code path in
+        // this method relied on the cascade declared on User.roles, but the
+        // @OneToMany + @JoinTable mapping does not reliably cascade a single
+        // managed Role into the join table when the user is created in the
+        // same transaction. We therefore write the join row directly to make
+        // the role available to security code that reads from user_roles.
+        userRoleRepository.save(UserRole.builder()
                 .userId(savedUser.getId())
                 .roleId(buyerRole.getId())
-                .build();
+                .build());
         savedUser.getRoles().add(buyerRole);
 
         CustomUserDetails userDetails = new CustomUserDetails(savedUser);
@@ -81,6 +90,7 @@ public class AuthServiceImpl implements AuthService {
                 .email(savedUser.getEmail())
                 .fullName(savedUser.getFullName())
                 .role(RoleCode.BUYER.name())
+                .roles(List.of(RoleCode.BUYER.name()))
                 .build();
     }
 
@@ -107,7 +117,8 @@ public class AuthServiceImpl implements AuthService {
                 .userId(user.getId())
                 .email(user.getEmail())
                 .fullName(user.getFullName())
-                .role(user.getRole() != null ? user.getRole().getCode() : null)
+                .role(UserRoleResolver.getHighestRoleCode(user))
+                .roles(UserRoleResolver.getAllRoleCodes(user))
                 .build();
     }
 
@@ -134,7 +145,8 @@ public class AuthServiceImpl implements AuthService {
                 .userId(user.getId())
                 .email(user.getEmail())
                 .fullName(user.getFullName())
-                .role(user.getRole() != null ? user.getRole().getCode() : null)
+                .role(UserRoleResolver.getHighestRoleCode(user))
+                .roles(UserRoleResolver.getAllRoleCodes(user))
                 .build();
     }
 }

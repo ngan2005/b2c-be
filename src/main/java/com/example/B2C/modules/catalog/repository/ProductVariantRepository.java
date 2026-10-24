@@ -62,4 +62,18 @@ public interface ProductVariantRepository extends BaseRepository<ProductVariant,
     long countLowStockForSeller(@Param("sellerId") Long sellerId,
                                 @Param("hidden") ProductStatus hidden,
                                 @Param("threshold") int threshold);
+
+    @Query("""
+        SELECT v FROM ProductVariant v
+        JOIN FETCH v.product p
+        WHERE v.stockQuantity <= :threshold
+          AND p.deletedAt IS NULL
+          AND p.status <> :hidden
+          AND v.isActive = true
+        ORDER BY v.stockQuantity ASC
+        """)
+    List<ProductVariant> findLowStockForAdmin(
+            @Param("threshold") int threshold,
+            @Param("hidden") ProductStatus hidden,
+            org.springframework.data.domain.Pageable pageable);
 }

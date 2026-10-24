@@ -79,6 +79,14 @@ public class SellerProductController {
         return ResponseEntity.ok(ApiResponse.success("Product deleted", null));
     }
 
+    @PostMapping("/{id}/restore")
+    @Operation(summary = "Restore a previously soft-deleted product within the undo window")
+    public ResponseEntity<ApiResponse<ProductDetailDto>> restore(@PathVariable Long id) {
+        Long userId = currentUserProvider.getCurrentUserId();
+        return ResponseEntity.ok(ApiResponse.success("Product restored",
+                productService.restoreProductForSeller(userId, id)));
+    }
+
     @PatchMapping("/{id}/status")
     @Operation(summary = "Change status of one of my products (DRAFT/PENDING/ACTIVE/HIDDEN)")
     public ResponseEntity<ApiResponse<ProductDetailDto>> updateStatus(

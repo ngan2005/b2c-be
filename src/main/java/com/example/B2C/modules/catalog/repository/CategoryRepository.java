@@ -17,6 +17,12 @@ public interface CategoryRepository extends BaseRepository<Category, Long> {
 
     @Query("SELECT c FROM Category c WHERE c.isActive = true ORDER BY c.sortOrder ASC")
     List<Category> findAllActive();
+    
+    List<Category> findByParentIsNullOrderBySortOrderAsc();
 
+    List<Category> findByParentIdOrderBySortOrderAsc(Long parentId);
+    
     boolean existsBySlug(String slug);
+    
+    long countById(Long id);
 }

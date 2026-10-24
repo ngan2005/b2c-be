@@ -24,4 +24,7 @@ public class CreateOrderRequest {
     private String voucherCode;
 
     private String note;
+
+    /** Client IP address forwarded by the API gateway or load balancer. */
+    private String clientIp;
 }

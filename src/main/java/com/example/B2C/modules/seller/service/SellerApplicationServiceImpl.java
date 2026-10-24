@@ -3,7 +3,10 @@ package com.example.B2C.modules.seller.service;
 import com.example.B2C.common.exception.BusinessException;
 import com.example.B2C.common.exception.ErrorCode;
 import com.example.B2C.common.exception.ResourceNotFoundException;
+import com.example.B2C.modules.auth.dto.AuthResponse;
 import com.example.B2C.modules.seller.dto.CreateSellerApplicationRequest;
+import com.example.B2C.modules.seller.dto.QuickUpgradeRequest;
+import com.example.B2C.modules.seller.dto.QuickUpgradeResponse;
 import com.example.B2C.modules.seller.dto.RejectSellerApplicationRequest;
 import com.example.B2C.modules.seller.dto.SellerApplicationAdminDetailResponse;
 import com.example.B2C.modules.seller.dto.SellerApplicationResponse;
@@ -17,17 +20,22 @@ import com.example.B2C.modules.user.entity.Role;
 import com.example.B2C.modules.user.entity.RoleCode;
 import com.example.B2C.modules.user.entity.User;
 import com.example.B2C.modules.user.entity.UserRole;
-import com.example.B2C.modules.user.entity.UserRoleId;
 import com.example.B2C.modules.user.repository.RoleRepository;
 import com.example.B2C.modules.user.repository.UserRepository;
 import com.example.B2C.modules.user.repository.UserRoleRepository;
+import com.example.B2C.modules.user.util.UserRoleResolver;
+import com.example.B2C.realtime.event.SellerApplicationCreatedEvent;
+import com.example.B2C.security.CustomUserDetails;
+import com.example.B2C.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -43,6 +51,8 @@ public class SellerApplicationServiceImpl implements SellerApplicationService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final UserRoleRepository userRoleRepository;
+    private final ApplicationEventPublisher applicationEventPublisher;
+    private final JwtTokenProvider jwtTokenProvider; // [SELLER-BUYER-UPGRADE]
 
     private static final Pattern SLUG_SANITIZE = Pattern.compile("[^a-z0-9\\-]");
     private static final Pattern MULTIPLE_HYPHENS = Pattern.compile("-+");
@@ -96,6 +106,10 @@ public class SellerApplicationServiceImpl implements SellerApplicationService {
                 .status(SellerApplicationStatus.PENDING)
                 .build();
         SellerApplication saved = applicationRepository.save(application);
+
+        applicationEventPublisher.publishEvent(new SellerApplicationCreatedEvent(
+                saved.getId(), saved.getShopName(), saved.getUser().getEmail(), Instant.now()
+        ));
 
         log.info("Seller application submitted: userId={}, applicationId={}", userId, saved.getId());
         return SellerApplicationResponse.from(saved);
@@ -151,6 +165,12 @@ public class SellerApplicationServiceImpl implements SellerApplicationService {
                     .roleId(sellerRole.getId())
                     .build();
             userRoleRepository.save(userRole);
+            // Keep the legacy single-role column in sync so AuthResponse.role
+            // (which is read from user.role) reports the *highest* role. Without
+            // this, a promoted user would still log in with `role=BUYER` in
+            // the response even though the JWT already grants ROLE_SELLER.
+            user.setRole(sellerRole);
+            userRepository.save(user);
             log.info("Added SELLER role to userId={} on approve applicationId={}", user.getId(), applicationId);
         }
 
@@ -237,5 +257,71 @@ public class SellerApplicationServiceImpl implements SellerApplicationService {
      */
     private String uniqueSlug(String baseSlug) {
         return baseSlug + "-" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    // [SELLER-BUYER-UPGRADE]
+    @Override
+    @Transactional
+    public QuickUpgradeResponse quickUpgrade(Long userId, QuickUpgradeRequest req) {
+        // 1. Load user and validate preconditions
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+
+        if (user.hasRole(RoleCode.SELLER.name()) || sellerRepository.existsByUserId(userId)) {
+            throw new BusinessException(ErrorCode.USER_ALREADY_SELLER);
+        }
+        if (!user.hasRole(RoleCode.BUYER.name())) {
+            throw new BusinessException(ErrorCode.BUYER_ROLE_REQUIRED);
+        }
+
+        // 2. Generate unique shop slug
+        String slug = uniqueSlug(generateSlug(req.getShopName()));
+
+        // 3. Create ACTIVE seller profile (skip PENDING/approve step)
+        Seller seller = Seller.builder()
+                .user(user)
+                .shopName(req.getShopName())
+                .slug(slug)
+                .businessType(req.getBusinessType())
+                .description(req.getShopDescription())
+                .idCardNumber(req.getIdCardNumber())
+                .status(SellerStatus.ACTIVE)
+                .build();
+        Seller savedSeller = sellerRepository.save(seller);
+
+        // 4. Add SELLER role via the join table (same pattern as approve())
+        if (!user.hasRole(RoleCode.SELLER.name())) {
+            Role sellerRole = roleRepository.findByCode(RoleCode.SELLER.name())
+                    .orElseThrow(() -> new IllegalStateException("SELLER role not found in database"));
+            UserRole userRole = UserRole.builder()
+                    .userId(user.getId())
+                    .roleId(sellerRole.getId())
+                    .build();
+            userRoleRepository.save(userRole);
+            user.getRoles().add(sellerRole);
+            // Keep legacy single-role column in sync so AuthResponse.role reports SELLER
+            user.setRole(sellerRole);
+            userRepository.save(user);
+            log.info("Added SELLER role to userId={} on quick-upgrade, sellerId={}", userId, savedSeller.getId());
+        }
+
+        // 5. Generate fresh JWT tokens so the frontend can update its auth store
+        CustomUserDetails userDetails = new CustomUserDetails(user);
+        String accessToken = jwtTokenProvider.generateToken(userDetails);
+        String refreshToken = jwtTokenProvider.generateRefreshToken(userDetails);
+
+        AuthResponse authResponse = AuthResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .tokenType("Bearer")
+                .userId(user.getId())
+                .email(user.getEmail())
+                .fullName(user.getFullName())
+                .role(UserRoleResolver.getHighestRoleCode(user))
+                .roles(UserRoleResolver.getAllRoleCodes(user))
+                .build();
+
+        log.info("Quick-upgrade completed: userId={}, sellerId={}", userId, savedSeller.getId());
+        return QuickUpgradeResponse.from(user, savedSeller, authResponse);
     }
 }

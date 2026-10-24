@@ -4,6 +4,7 @@ import com.example.B2C.common.exception.UnauthorizedException;
 import com.example.B2C.common.response.ApiResponse;
 import com.example.B2C.modules.user.dto.AddressDto;
 import com.example.B2C.modules.user.dto.AddressRequest;
+import com.example.B2C.modules.user.dto.AvatarUploadResponse;
 import com.example.B2C.modules.user.dto.ChangePasswordRequest;
 import com.example.B2C.modules.user.dto.UpdateProfileRequest;
 import com.example.B2C.modules.user.dto.UserProfileDto;
@@ -12,16 +13,20 @@ import com.example.B2C.modules.user.service.UserService;
 import com.example.B2C.security.CustomUserDetails;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -50,6 +55,28 @@ public class UserController {
     public ResponseEntity<ApiResponse<UserProfileDto>> updateMyProfile(@Valid @RequestBody UpdateProfileRequest request) {
         Long userId = currentUserId();
         return ResponseEntity.ok(ApiResponse.success("Profile updated", userService.updateProfile(userId, request)));
+    }
+
+    @PostMapping(value = "/me/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Upload the current user's avatar",
+            description = "Accepts a single multipart file (image/jpeg, image/png, image/webp). "
+                    + "The asset is streamed to the storage backend (Cloudinary in production) and "
+                    + "users.avatar_url is updated to point at it. The previously stored avatar is "
+                    + "destroyed from the storage backend so it does not linger as an orphan.")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Avatar uploaded",
+                    content = @Content(schema = @Schema(implementation = AvatarUploadResponse.class))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Empty file or unsupported image type"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Not authenticated"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "User not found"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "503", description = "Storage backend not configured")
+    })
+    public ResponseEntity<ApiResponse<AvatarUploadResponse>> uploadAvatar(
+            @Parameter(description = "Image file (max 5 MB, allowed: JPEG/PNG/WebP)")
+            @RequestParam("file") MultipartFile file) {
+        Long userId = currentUserId();
+        AvatarUploadResponse response = userService.uploadAvatar(userId, file);
+        return ResponseEntity.ok(ApiResponse.success("Avatar updated", response));
     }
 
     @PostMapping("/change-password")
