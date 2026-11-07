@@ -14,14 +14,20 @@ import java.util.List;
 @Schema(description = "Seller statement: summary totals + recent payout history")
 public class SellerStatementDto {
 
-    @Schema(description = "Total pending (unpaid) net amount for this seller")
+    @Schema(description = "Total pending in escrow (held during return window)")
     private BigDecimal totalPending;
+
+    @Schema(description = "Total ready / available balance to withdraw")
+    private BigDecimal totalReady;
 
     @Schema(description = "Total amount already paid out to this seller")
     private BigDecimal totalPaid;
 
-    @Schema(description = "Lifetime total (gross earned, sum of all completed orders' net amounts)")
+    @Schema(description = "Lifetime total net earnings (pending + ready + paid)")
     private BigDecimal lifetimeEarned;
+
+    @Schema(description = "Seller shop name")
+    private String shopName;
 
     @Schema(description = "Recent payout records (most recent first)")
     private List<SellerPayoutDto> recentPayouts;
