@@ -80,6 +80,15 @@ public interface ProductVariantRepository extends BaseRepository<ProductVariant,
             org.springframework.data.domain.Pageable pageable);
 
     @Query("""
+        SELECT v FROM ProductVariant v
+        JOIN FETCH v.product p
+        LEFT JOIN FETCH p.seller s
+        WHERE p.deletedAt IS NULL
+        ORDER BY p.id DESC, v.id ASC
+        """)
+    List<ProductVariant> findTopVariantsForAdmin(Pageable pageable);
+
+    @Query("""
         SELECT COUNT(v) FROM ProductVariant v
         JOIN v.product p
         WHERE p.seller.id = :sellerId
