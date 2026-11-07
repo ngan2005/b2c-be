@@ -166,14 +166,23 @@ public class OrderServiceImpl implements OrderService {
             releaseStockForOrder(orderId);
             eventPublisher.publishEvent(new OrderCancelledEvent(this, orderId, order.getBuyerId(), sellerId, note));
         }
+        if (newStatus == OrderStatus.RETURNED) {
+            releaseStockForOrder(orderId);
+        }
         if (newStatus == OrderStatus.SHIPPING) {
             eventPublisher.publishEvent(new OrderShippedEvent(this, orderId, order.getBuyerId(), sellerId));
         }
 
-        // ── Commission snapshot on COMPLETED ──
+        // ── Commission snapshot & Stock confirmation on COMPLETED ──
         // Order completion is the source of truth; commission records are derived.
         // Failures here must NOT break order completion — log and continue.
         if (newStatus == OrderStatus.COMPLETED) {
+            if (!"PAID".equalsIgnoreCase(saved.getPaymentStatus())) {
+                saved.setPaymentStatus("PAID");
+                saved = orderRepository.save(saved);
+                confirmStockForOrder(orderId);
+            }
+
             List<OrderItem> itemsForCommission = orderItemRepository.findByOrderId(orderId);
             for (OrderItem item : itemsForCommission) {
                 try {
@@ -526,7 +535,8 @@ public class OrderServiceImpl implements OrderService {
         stateMachine.transition(order, OrderStatus.RETURNED);
         order.setReturnApprovedAt(LocalDateTime.now());
         Order saved = orderRepository.save(order);
-        log.info("Return approved for order {}", order.getOrderCode());
+        releaseStockForOrder(orderId);
+        log.info("Return approved and stock released for order {}", order.getOrderCode());
         return toDetailDto(saved, orderItemRepository.findByOrderId(orderId));
     }
 
@@ -585,18 +595,30 @@ public class OrderServiceImpl implements OrderService {
         return dto;
     }
 
-    private void releaseStockForOrder(Long orderId) {
-        // InventoryPort.release() now dispatches internally: it releases from
-        // reservedQuantity when stock is held by an unpaid order, or from soldCount
-        // when the order was already confirmed. Either way the invariant
-        //   stockQuantity + reservedQuantity + soldCount = initial stock
-        // is preserved per variant.
+    private void confirmStockForOrder(Long orderId) {
         for (OrderItem item : orderItemRepository.findByOrderId(orderId)) {
             try {
-                inventoryPort.release(item.getVariantId(), item.getQuantity());
+                inventoryPort.confirm(item.getVariantId(), item.getQuantity());
             } catch (RuntimeException ex) {
-                log.warn("Failed to release stock for variant {} qty {}: {}",
+                log.warn("Failed to confirm stock for variant {} qty {}: {}",
                         item.getVariantId(), item.getQuantity(), ex.getMessage());
+            }
+        }
+    }
+
+    private void releaseStockForOrder(Long orderId) {
+        Order order = orderRepository.findById(orderId).orElse(null);
+        boolean wasPaid = order != null && "PAID".equalsIgnoreCase(order.getPaymentStatus());
+        for (OrderItem item : orderItemRepository.findByOrderId(orderId)) {
+            try {
+                if (wasPaid) {
+                    inventoryPort.releaseSold(item.getVariantId(), item.getQuantity());
+                } else {
+                    inventoryPort.releaseReserved(item.getVariantId(), item.getQuantity());
+                }
+            } catch (RuntimeException ex) {
+                log.warn("Failed to release stock for variant {} qty {} (wasPaid={}): {}",
+                        item.getVariantId(), item.getQuantity(), wasPaid, ex.getMessage());
             }
         }
     }

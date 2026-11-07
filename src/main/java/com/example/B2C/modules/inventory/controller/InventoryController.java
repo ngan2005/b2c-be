@@ -42,8 +42,13 @@ public class InventoryController {
     public ResponseEntity<ApiResponse<List<SelectableProductVariantDto>>> getRealProducts() {
         List<ProductVariant> variants = variantRepository.findTopVariantsForAdmin(PageRequest.of(0, 50));
         List<SelectableProductVariantDto> dtos = variants.stream().map(v -> {
-            int stock = v.getStockQuantity() == null ? 0 : v.getStockQuantity();
             int reserved = v.getReservedQuantity() == null ? 0 : v.getReservedQuantity();
+            if (reserved > 0) {
+                try {
+                    reserved = inventoryService.reconcileReservations(v.getId());
+                } catch (Exception ignored) {}
+            }
+            int stock = v.getStockQuantity() == null ? 0 : v.getStockQuantity();
             int available = Math.max(0, stock - reserved);
             String img = v.getImageUrl();
             if ((img == null || img.isBlank()) && v.getProduct() != null) {
@@ -66,6 +71,14 @@ public class InventoryController {
                     .build();
         }).toList();
         return ResponseEntity.ok(ApiResponse.success(dtos));
+    }
+
+    @PutMapping("/variants/{id}/reconcile")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Reconcile reserved quantity against active orders")
+    public ResponseEntity<ApiResponse<Integer>> reconcileStock(@PathVariable Long id) {
+        int reconciled = inventoryService.reconcileReservations(id);
+        return ResponseEntity.ok(ApiResponse.success("Đã đồng bộ lại lượng giữ chỗ thực tế", reconciled));
     }
 
     @PutMapping("/variants/{id}/reset-stock")

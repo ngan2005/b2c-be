@@ -3,6 +3,7 @@ package com.example.B2C.modules.inventory.service;
 import com.example.B2C.common.exception.BadRequestException;
 import com.example.B2C.common.exception.ForbiddenException;
 import com.example.B2C.common.exception.ResourceNotFoundException;
+import com.example.B2C.common.port.InventoryPort;
 import com.example.B2C.common.response.PageResponse;
 import com.example.B2C.modules.catalog.entity.ProductVariant;
 import com.example.B2C.modules.catalog.repository.ProductVariantRepository;
@@ -28,6 +29,7 @@ public class SellerInventoryService {
 
     private final ProductVariantRepository variantRepository;
     private final SellerRepository sellerRepository;
+    private final InventoryPort inventoryPort;
 
     @Transactional(readOnly = true)
     public SellerInventoryOverviewDto getInventoryOverview(Long userId, String filter, String keyword, int page, int size) {
@@ -81,7 +83,8 @@ public class SellerInventoryService {
             throw new ForbiddenException("Bạn không có quyền chỉnh sửa tồn kho của sản phẩm này");
         }
 
-        int reserved = variant.getReservedQuantity() == null ? 0 : variant.getReservedQuantity();
+        // Reconcile any stale/ghost reservations against real active orders first
+        int reserved = inventoryPort.reconcileReservations(variantId);
         if (newStock < reserved) {
             throw new BadRequestException("Số lượng tồn kho (" + newStock + ") không thể nhỏ hơn số lượng đang giữ chỗ cho khách (" + reserved + ")");
         }

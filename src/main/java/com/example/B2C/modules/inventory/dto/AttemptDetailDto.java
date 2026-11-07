@@ -16,3 +16,4 @@ public class AttemptDetailDto {
     private long latencyMs;
     private String message;
 }
+

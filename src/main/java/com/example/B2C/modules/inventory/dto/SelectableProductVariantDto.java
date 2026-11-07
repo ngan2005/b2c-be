@@ -24,3 +24,4 @@ public class SelectableProductVariantDto {
     private Integer availableStock;
     private String shopName;
 }
+

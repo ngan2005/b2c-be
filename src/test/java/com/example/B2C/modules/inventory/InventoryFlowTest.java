@@ -170,4 +170,18 @@ class InventoryFlowTest {
         assertEquals(0, after.getReservedQuantity());
         assertEquals(0, after.getSoldCount());
     }
+
+    @Test
+    @DisplayName("reconcileReservations: cleans up stale ghost reservations when no active order exists")
+    void reconcileReservations_cleansGhostReservations() {
+        ProductVariant v = variantRepository.findById(variantId).orElseThrow();
+        v.setReservedQuantity(16); // Ghost reservation from aborted test/orders
+        variantRepository.saveAndFlush(v);
+
+        int active = inventoryService.reconcileReservations(variantId);
+        assertEquals(0, active, "No active orders so active reservations must be 0");
+
+        ProductVariant reconciled = variantRepository.findById(variantId).orElseThrow();
+        assertEquals(0, reconciled.getReservedQuantity(), "Reserved quantity reconciled to 0");
+    }
 }

@@ -17,3 +17,4 @@ public class LoadTestExecutionResponse {
     private List<Integer> successfulRequestIds;
     private List<AttemptDetailDto> attempts;
 }
+

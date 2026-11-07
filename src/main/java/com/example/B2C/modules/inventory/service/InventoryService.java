@@ -6,6 +6,7 @@ import com.example.B2C.common.port.InventoryPort;
 import com.example.B2C.modules.catalog.entity.ProductVariant;
 import com.example.B2C.modules.catalog.repository.ProductVariantRepository;
 import com.example.B2C.modules.inventory.strategy.InventoryStrategy;
+import com.example.B2C.modules.order.repository.OrderItemRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,7 @@ public class InventoryService implements InventoryPort {
 
     private final ProductVariantRepository repository;
     private final InventoryStrategy activeStrategy;
+    private final OrderItemRepository orderItemRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -100,6 +102,7 @@ public class InventoryService implements InventoryPort {
      * Release stock that was held in {@code reservedQuantity} (cancel before payment).
      * Invariant: {@code stockQuantity += qty; reservedQuantity -= qty}.
      */
+    @Override
     @Transactional
     public void releaseReserved(Long variantId, int qty) {
         if (qty <= 0) {
@@ -114,6 +117,7 @@ public class InventoryService implements InventoryPort {
      * Release stock that was already confirmed (cancel after payment, e.g. admin
      * override / refund). Invariant: {@code stockQuantity += qty; soldCount -= qty}.
      */
+    @Override
     @Transactional
     public void releaseSold(Long variantId, int qty) {
         if (qty <= 0) {
@@ -124,29 +128,44 @@ public class InventoryService implements InventoryPort {
         releaseSoldInternal(v, qty);
     }
 
+    @Override
+    @Transactional
+    public int reconcileReservations(Long variantId) {
+        ProductVariant v = repository.findByIdForUpdate(variantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Variant", "id: " + variantId));
+        int actualActive = orderItemRepository.sumActiveReservationsByVariantId(variantId);
+        int currentReserved = v.getReservedQuantity() == null ? 0 : v.getReservedQuantity();
+        if (currentReserved != actualActive) {
+            log.info("Reconciled reservations for variant {}: {} -> {}", variantId, currentReserved, actualActive);
+            v.setReservedQuantity(actualActive);
+            repository.save(v);
+        }
+        return actualActive;
+    }
+
     private void releaseReservedInternal(ProductVariant v, int qty) {
         int reserved = v.getReservedQuantity() == null ? 0 : v.getReservedQuantity();
+        int toRelease = Math.min(qty, reserved);
         if (reserved < qty) {
-            throw new IllegalStateException(
-                    "Cannot release " + qty + " reserved units of variant " + v.getId()
-                            + ": only " + reserved + " reserved");
+            log.warn("Variant {} requested release of {} reserved units, but only {} were reserved. Clamping.",
+                    v.getId(), qty, reserved);
         }
-        v.setReservedQuantity(reserved - qty);
+        v.setReservedQuantity(reserved - toRelease);
         repository.save(v);
-        log.info("Released {} reserved units back to stock for variant {}", qty, v.getId());
+        log.info("Released {} reserved units for variant {}", toRelease, v.getId());
     }
 
     private void releaseSoldInternal(ProductVariant v, int qty) {
         int sold = v.getSoldCount() == null ? 0 : v.getSoldCount();
+        int toDeduct = Math.min(qty, sold);
         if (sold < qty) {
-            throw new IllegalStateException(
-                    "Cannot release " + qty + " sold units of variant " + v.getId()
-                            + ": only " + sold + " sold");
+            log.warn("Variant {} requested return of {} sold units, but only {} recorded sold. Clamping soldCount.",
+                    v.getId(), qty, sold);
         }
-        v.setSoldCount(sold - qty);
+        v.setSoldCount(sold - toDeduct);
         v.setStockQuantity((v.getStockQuantity() == null ? 0 : v.getStockQuantity()) + qty);
         repository.save(v);
-        log.info("Released {} sold units back to stock for variant {}", qty, v.getId());
+        log.info("Released {} returned units back to physical stock for variant {}", qty, v.getId());
     }
 
     @Override
