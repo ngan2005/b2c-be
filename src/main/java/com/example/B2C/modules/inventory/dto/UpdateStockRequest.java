@@ -15,3 +15,4 @@ public class UpdateStockRequest {
     @Min(value = 0, message = "Số lượng tồn kho phải lớn hơn hoặc bằng 0")
     private Integer stockQuantity;
 }
+

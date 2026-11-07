@@ -42,12 +42,22 @@ public class SellerInventoryService {
         long outOfStockCount = variantRepository.countOutOfStockBySellerId(sellerId);
 
         Pageable pageable = PageRequest.of(Math.max(0, page), Math.min(Math.max(1, size), 100));
-        Page<ProductVariant> variantsPage = variantRepository.findSellerVariants(
-                sellerId,
-                normalisedFilter,
-                trimmedKeyword,
-                pageable
-        );
+        Page<ProductVariant> variantsPage;
+        if (trimmedKeyword != null) {
+            String pattern = "%" + trimmedKeyword.toLowerCase() + "%";
+            variantsPage = variantRepository.findSellerVariantsWithKeyword(
+                    sellerId,
+                    normalisedFilter,
+                    pattern,
+                    pageable
+            );
+        } else {
+            variantsPage = variantRepository.findSellerVariantsWithoutKeyword(
+                    sellerId,
+                    normalisedFilter,
+                    pageable
+            );
+        }
 
         Page<SellerInventoryItemDto> dtoPage = variantsPage.map(this::toDto);
 
@@ -125,3 +135,4 @@ public class SellerInventoryService {
                 .build();
     }
 }
+

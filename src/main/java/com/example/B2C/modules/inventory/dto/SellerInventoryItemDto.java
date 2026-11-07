@@ -30,3 +30,4 @@ public class SellerInventoryItemDto {
     private Boolean isActive;
     private LocalDateTime updatedAt;
 }
+

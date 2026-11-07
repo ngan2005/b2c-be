@@ -16,3 +16,4 @@ public class SellerInventoryOverviewDto {
     private long outOfStockCount;
     private PageResponse<SellerInventoryItemDto> items;
 }
+

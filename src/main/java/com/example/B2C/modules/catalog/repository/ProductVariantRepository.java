@@ -111,12 +111,9 @@ public interface ProductVariantRepository extends BaseRepository<ProductVariant,
         JOIN FETCH v.product p
         WHERE p.seller.id = :sellerId
           AND p.deletedAt IS NULL
-          AND (:filter IS NULL OR :filter = 'ALL'
+          AND (:filter = 'ALL'
                OR (:filter = 'LOW_STOCK' AND v.stockQuantity <= 5 AND v.stockQuantity > 0)
                OR (:filter = 'OUT_OF_STOCK' AND v.stockQuantity = 0))
-          AND (:keyword IS NULL OR LOWER(v.sku) LIKE LOWER(CONCAT('%', :keyword, '%'))
-               OR LOWER(v.variantName) LIKE LOWER(CONCAT('%', :keyword, '%'))
-               OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
         ORDER BY v.updatedAt DESC
         """,
         countQuery = """
@@ -124,16 +121,43 @@ public interface ProductVariantRepository extends BaseRepository<ProductVariant,
         JOIN v.product p
         WHERE p.seller.id = :sellerId
           AND p.deletedAt IS NULL
-          AND (:filter IS NULL OR :filter = 'ALL'
+          AND (:filter = 'ALL'
                OR (:filter = 'LOW_STOCK' AND v.stockQuantity <= 5 AND v.stockQuantity > 0)
                OR (:filter = 'OUT_OF_STOCK' AND v.stockQuantity = 0))
-          AND (:keyword IS NULL OR LOWER(v.sku) LIKE LOWER(CONCAT('%', :keyword, '%'))
-               OR LOWER(v.variantName) LIKE LOWER(CONCAT('%', :keyword, '%'))
-               OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
         """)
-    Page<ProductVariant> findSellerVariants(
+    Page<ProductVariant> findSellerVariantsWithoutKeyword(
             @Param("sellerId") Long sellerId,
             @Param("filter") String filter,
-            @Param("keyword") String keyword,
+            Pageable pageable);
+
+    @Query(value = """
+        SELECT v FROM ProductVariant v
+        JOIN FETCH v.product p
+        WHERE p.seller.id = :sellerId
+          AND p.deletedAt IS NULL
+          AND (:filter = 'ALL'
+               OR (:filter = 'LOW_STOCK' AND v.stockQuantity <= 5 AND v.stockQuantity > 0)
+               OR (:filter = 'OUT_OF_STOCK' AND v.stockQuantity = 0))
+          AND (LOWER(v.sku) LIKE :pattern
+               OR LOWER(v.variantName) LIKE :pattern
+               OR LOWER(p.name) LIKE :pattern)
+        ORDER BY v.updatedAt DESC
+        """,
+        countQuery = """
+        SELECT COUNT(v) FROM ProductVariant v
+        JOIN v.product p
+        WHERE p.seller.id = :sellerId
+          AND p.deletedAt IS NULL
+          AND (:filter = 'ALL'
+               OR (:filter = 'LOW_STOCK' AND v.stockQuantity <= 5 AND v.stockQuantity > 0)
+               OR (:filter = 'OUT_OF_STOCK' AND v.stockQuantity = 0))
+          AND (LOWER(v.sku) LIKE :pattern
+               OR LOWER(v.variantName) LIKE :pattern
+               OR LOWER(p.name) LIKE :pattern)
+        """)
+    Page<ProductVariant> findSellerVariantsWithKeyword(
+            @Param("sellerId") Long sellerId,
+            @Param("filter") String filter,
+            @Param("pattern") String pattern,
             Pageable pageable);
 }
