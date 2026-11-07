@@ -102,6 +102,16 @@ public interface OrderRepository extends BaseRepository<Order, Long> {
             @Param("status") OrderStatus status,
             org.springframework.data.domain.Pageable pageable);
 
+    @Query("""
+        SELECT o FROM Order o
+        WHERE o.status = com.example.B2C.modules.order.entity.OrderStatus.PENDING
+          AND (o.paymentStatus IS NULL OR o.paymentStatus = 'UNPAID')
+          AND (o.paymentMethod IS NULL OR UPPER(o.paymentMethod) <> 'COD')
+          AND o.createdAt < :cutoff
+        ORDER BY o.createdAt ASC
+        """)
+    java.util.List<Order> findExpiredUnpaidOrders(@Param("cutoff") LocalDateTime cutoff);
+
     // ----- Admin stats -----
 
     @Query("""

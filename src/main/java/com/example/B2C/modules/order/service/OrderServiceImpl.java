@@ -82,6 +82,9 @@ public class OrderServiceImpl implements OrderService {
     private final com.example.B2C.modules.promotion.repository.PromotionRepository promotionRepository;
     private final com.example.B2C.modules.promotion.service.PromotionService promotionService;
 
+    @org.springframework.beans.factory.annotation.Value("${app.order.unpaid-ttl-minutes:15}")
+    private int unpaidTtlMinutes;
+
     private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED_TRANSITIONS = Map.of(
             OrderStatus.PENDING,   Set.of(OrderStatus.CONFIRMED, OrderStatus.CANCELLED),
             OrderStatus.CONFIRMED, Set.of(OrderStatus.PACKED, OrderStatus.CANCELLED),
@@ -782,5 +785,42 @@ public class OrderServiceImpl implements OrderService {
         }
 
         return BigDecimal.valueOf(baseFee);
+    }
+
+    @Override
+    @Transactional
+    public int cancelExpiredUnpaidOrders() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(unpaidTtlMinutes);
+        List<Order> expiredOrders = orderRepository.findExpiredUnpaidOrders(cutoff);
+        if (expiredOrders.isEmpty()) {
+            return 0;
+        }
+        log.info("Found {} expired unpaid orders older than {} minutes to auto-cancel",
+                expiredOrders.size(), unpaidTtlMinutes);
+
+        int count = 0;
+        for (Order order : expiredOrders) {
+            try {
+                if (order.getStatus() == OrderStatus.PENDING
+                        && (order.getPaymentStatus() == null || !"PAID".equalsIgnoreCase(order.getPaymentStatus()))) {
+                    stateMachine.transition(order, OrderStatus.CANCELLED);
+                    LocalDateTime now = LocalDateTime.now();
+                    order.setCancelledAt(now);
+                    order.setCancelledBy(null); // System cancellation
+                    order.setCancelReason("Hết thời gian thanh toán (Quá " + unpaidTtlMinutes + " phút)");
+                    orderRepository.save(order);
+
+                    releaseStockForOrder(order.getId());
+                    eventPublisher.publishEvent(new OrderCancelledEvent(
+                            this, order.getId(), order.getBuyerId(), order.getSellerId(), order.getCancelReason()));
+                    count++;
+                    log.info("Auto-cancelled expired order {} (id={}, buyer={}, total={}) and released reserved inventory",
+                            order.getOrderCode(), order.getId(), order.getBuyerId(), order.getTotalAmount());
+                }
+            } catch (Exception ex) {
+                log.error("Failed to auto-cancel expired order {}: {}", order.getOrderCode(), ex.getMessage(), ex);
+            }
+        }
+        return count;
     }
 }

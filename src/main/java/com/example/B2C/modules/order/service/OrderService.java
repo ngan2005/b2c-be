@@ -45,4 +45,12 @@ public interface OrderService {
 
     // P2.1 — Preview order (no DB write)
     OrderPreviewResponse previewOrder(Long userId, PreviewOrderRequest request);
+
+    /**
+     * Scan and auto-cancel PENDING unpaid orders exceeding TTL (default 15 minutes)
+     * and release reserved stock back to available inventory.
+     *
+     * @return count of cancelled orders
+     */
+    int cancelExpiredUnpaidOrders();
 }

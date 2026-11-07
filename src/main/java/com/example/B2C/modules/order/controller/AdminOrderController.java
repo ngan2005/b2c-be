@@ -60,4 +60,11 @@ public class AdminOrderController {
         return ResponseEntity.ok(ApiResponse.success("Return rejected",
                 orderService.rejectReturn(id, note)));
     }
+
+    @PostMapping("/cleanup-expired")
+    @Operation(summary = "Manually trigger auto-cancellation of expired unpaid orders")
+    public ResponseEntity<ApiResponse<Integer>> cleanupExpired() {
+        int count = orderService.cancelExpiredUnpaidOrders();
+        return ResponseEntity.ok(ApiResponse.success("Đã quét và hủy " + count + " đơn hàng quá hạn thanh toán", count));
+    }
 }
