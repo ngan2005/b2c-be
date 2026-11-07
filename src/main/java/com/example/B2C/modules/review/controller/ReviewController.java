@@ -50,8 +50,7 @@ public class ReviewController {
     @GetMapping("/products/{productId}/reviews")
     @Operation(
             summary = "List visible reviews for a product",
-            description = "Public endpoint — returns paginated, visible reviews for a given product. "
-                    + "Anonymous reviewers show as 'Anonymous'."
+            description = "Public endpoint — returns paginated, visible reviews for a given product. Supports filtering by rating (1-5 stars)."
     )
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Reviews retrieved"),
@@ -59,10 +58,11 @@ public class ReviewController {
     })
     public ResponseEntity<ApiResponse<PageResponse<ReviewDto>>> listByProduct(
             @Parameter(description = "Product ID") @PathVariable Long productId,
+            @Parameter(description = "Filter by star rating (1-5)") @RequestParam(required = false) Integer rating,
             @Parameter(description = "Zero-based page index") @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "Page size (max 100)") @RequestParam(defaultValue = "10") int size) {
         return ResponseEntity.ok(ApiResponse.success(
-                reviewService.listByProduct(productId, page, size)));
+                reviewService.listByProduct(productId, rating, page, size)));
     }
 
     @GetMapping("/seller/reviews")

@@ -25,6 +25,13 @@ public class OrderSummaryDto {
     private BigDecimal totalAmount;
     private LocalDateTime createdAt;
 
+    // --- Mobile buyer fields (P0.2) ---
+    private String shopName;
+    private String firstProductName;
+    private String firstProductThumbnail;
+    private String firstVariantName;
+    private Integer totalItemsCount;
+
     public static OrderSummaryDto from(Order order) {
         return OrderSummaryDto.builder()
                 .id(order.getId())

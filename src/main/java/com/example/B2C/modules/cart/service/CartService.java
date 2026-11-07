@@ -52,9 +52,6 @@ public class CartService {
             throw new BadRequestException("Quantity must be > 0");
         }
         ProductVariantView variant = catalogFacade.getVariant(req.getVariantId());
-        if (!inventoryPort.isAvailable(req.getVariantId(), req.getQuantity())) {
-            throw new BadRequestException("Requested quantity not available");
-        }
         Cart cart = getOrCreateCart(userId);
         ProductVariant variantProxy = entityManager.getReference(ProductVariant.class, req.getVariantId());
         CartItem item = cartItemRepository.findByCartIdAndVariantId(cart.getId(), req.getVariantId())
@@ -69,7 +66,11 @@ public class CartService {
                         .quantity(0)
                         .isSelected(true)
                         .build());
-        item.setQuantity(item.getQuantity() + req.getQuantity());
+        int newQuantity = item.getQuantity() + req.getQuantity();
+        if (!inventoryPort.isAvailable(req.getVariantId(), newQuantity)) {
+            throw new BadRequestException("Requested quantity not available");
+        }
+        item.setQuantity(newQuantity);
         item.setPriceSnapshot(variant.unitPrice());
         if (item.getVariant() == null) {
             item.setVariant(variantProxy);
@@ -88,7 +89,7 @@ public class CartService {
                 .orElseThrow(() -> new ResourceNotFoundException("CartItem", "id: " + itemId));
         Long varId = item.getVariantId();
         if (req.getQuantity() != null && req.getQuantity() > 0) {
-            if (!inventoryPort.isAvailable(varId, req.getQuantity())) {
+            if (!req.getQuantity().equals(item.getQuantity()) && !inventoryPort.isAvailable(varId, req.getQuantity())) {
                 throw new BadRequestException("Requested quantity not available");
             }
             item.setQuantity(req.getQuantity());
@@ -130,12 +131,27 @@ public class CartService {
         });
     }
 
+    @Transactional
+    public void removeItems(Long userId, List<Long> itemIds) {
+        Cart cart = getOrCreateCart(userId);
+        List<CartItem> items = cartItemRepository.findByCartId(cart.getId()).stream()
+                .filter(ci -> itemIds.contains(ci.getId()))
+                .toList();
+        cartItemRepository.deleteAll(items);
+    }
+
+    public long countItems(Long userId) {
+        Cart cart = getOrCreateCart(userId);
+        return cartItemRepository.countByCartId(cart.getId());
+    }
+
     private static CartItemDto toDto(CartItem item) {
         BigDecimal unit = item.getPriceSnapshot();
         BigDecimal line = unit == null ? BigDecimal.ZERO
                 : unit.multiply(BigDecimal.valueOf(item.getQuantity()));
         Long varId = item.getVariantId();
-        return CartItemDto.builder()
+
+        CartItemDto.CartItemDtoBuilder builder = CartItemDto.builder()
                 .id(item.getId())
                 .variantId(varId)
                 .variantName(item.getVariantName())
@@ -145,7 +161,32 @@ public class CartService {
                 .priceSnapshot(unit)
                 .lineTotal(line)
                 .isSelected(item.getIsSelected())
-                .addedAt(item.getAddedAt())
-                .build();
+                .addedAt(item.getAddedAt());
+
+        // Populate mobile-required fields by traversing variant → product → seller
+        try {
+            com.example.B2C.modules.catalog.entity.ProductVariant v = item.getVariant();
+            if (v != null) {
+                builder.stockQuantity(v.getStockQuantity());
+                boolean active = Boolean.TRUE.equals(v.getIsActive())
+                        && v.getStockQuantity() != null
+                        && v.getStockQuantity() > 0;
+                builder.isAvailable(active);
+                com.example.B2C.modules.catalog.entity.Product p = v.getProduct();
+                if (p != null) {
+                    builder.productId(p.getId());
+                    builder.productSlug(p.getSlug());
+                    com.example.B2C.modules.seller.entity.Seller s = p.getSeller();
+                    if (s != null) {
+                        builder.sellerId(s.getId());
+                        builder.shopName(s.getShopName());
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // Lazy-load not available in certain call paths — mobile fields will be null
+        }
+
+        return builder.build();
     }
 }

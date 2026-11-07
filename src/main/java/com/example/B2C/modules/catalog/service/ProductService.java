@@ -21,6 +21,9 @@ public interface ProductService {
 
     void incrementViewCount(Long productId);
 
+    // P1.1 — Get product detail by numeric ID
+    ProductDetailDto getProductDetailById(Long id);
+
     // ----- Seller-only product management -----
 
     PageResponse<ProductSummaryDto> listProductsForCurrentSeller(Long sellerId, ProductStatus status,

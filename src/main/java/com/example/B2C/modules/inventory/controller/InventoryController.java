@@ -30,6 +30,16 @@ public class InventoryController {
         return ResponseEntity.ok(ApiResponse.success(inventoryService.getAvailableStock(id)));
     }
 
+    @PutMapping("/variants/{id}/reset-stock")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Reset available stock and clear reservations for experiment")
+    public ResponseEntity<ApiResponse<Integer>> resetStock(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "5") int stockQuantity) {
+        inventoryService.resetStockForExperiment(id, stockQuantity);
+        return ResponseEntity.ok(ApiResponse.success("Đã cài lại tồn kho", stockQuantity));
+    }
+
     @PostMapping("/load-test/run")
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Run a concurrency experiment for a given scenario and variant")

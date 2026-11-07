@@ -6,6 +6,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
 
 @Data
 @Builder
@@ -24,4 +26,10 @@ public class ProductVariantDto {
     private Integer weightGram;
     private String barcode;
     private Boolean isActive;
+
+    // P1.3 — IDs of the option values (e.g. colour, size) assigned to this variant
+    private List<Long> optionValueIds;
+
+    // Key-value attributes: e.g. {"Màu sắc": "Đỏ", "Kích thước": "XL"}
+    private Map<String, String> attributes;
 }

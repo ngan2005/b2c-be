@@ -10,6 +10,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 @Builder
@@ -51,4 +52,7 @@ public class CreateProductRequest {
      * Optional desired status. Defaults to DRAFT when null.
      */
     private String status;
+
+    private List<ProductOptionRequest> options;
+    private List<ProductVariantRequest> variants;
 }

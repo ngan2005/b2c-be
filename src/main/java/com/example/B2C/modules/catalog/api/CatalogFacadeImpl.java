@@ -68,6 +68,21 @@ public class CatalogFacadeImpl implements CatalogFacade {
                 .orElse(null);
     }
 
+    @Override
+    public Integer getWeightGram(Long variantId) {
+        return variantRepository.findById(variantId)
+                .map(v -> {
+                    if (v.getWeightGram() != null && v.getWeightGram() > 0) {
+                        return v.getWeightGram();
+                    }
+                    if (v.getProduct() != null && v.getProduct().getWeightGram() != null && v.getProduct().getWeightGram() > 0) {
+                        return v.getProduct().getWeightGram();
+                    }
+                    return 250; // default 250g
+                })
+                .orElse(250);
+    }
+
     private String resolveImageUrl(ProductVariant v) {
         if (v.getImageUrl() != null && !v.getImageUrl().isBlank()) {
             return v.getImageUrl();
@@ -81,7 +96,8 @@ public class CatalogFacadeImpl implements CatalogFacade {
     private ProductVariantView toView(ProductVariant v) {
         BigDecimal price = v.getSalePrice() != null ? v.getSalePrice() : v.getPrice();
         int reserved = v.getReservedQuantity() != null ? v.getReservedQuantity() : 0;
-        int available = Math.max(0, v.getStockQuantity() - reserved);
+        int stock = v.getStockQuantity() != null ? v.getStockQuantity() : 0;
+        int available = Math.max(0, stock - reserved);
         return new ProductVariantView(
                 v.getId(),
                 v.getProduct().getId(),

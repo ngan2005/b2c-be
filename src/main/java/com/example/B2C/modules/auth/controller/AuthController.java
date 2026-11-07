@@ -70,4 +70,16 @@ public class AuthController {
         AuthResponse response = authService.refreshToken(request);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
+
+    @PostMapping("/logout")
+    @Operation(
+            summary = "Log out user (P2.2)",
+            description = "Stateless logout — client discards stored access and refresh tokens."
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Logged out successfully")
+    })
+    public ResponseEntity<ApiResponse<Void>> logout() {
+        return ResponseEntity.ok(ApiResponse.success("Logged out successfully", null));
+    }
 }

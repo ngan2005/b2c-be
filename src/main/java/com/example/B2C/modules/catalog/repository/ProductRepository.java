@@ -31,6 +31,8 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
           AND (:sellerId IS NULL OR p.seller.id = :sellerId)
           AND (:minPrice IS NULL OR p.minPrice >= :minPrice)
           AND (:maxPrice IS NULL OR p.maxPrice <= :maxPrice)
+          AND (:brand IS NULL OR p.brand = :brand)
+          AND (:minRating IS NULL OR p.ratingAvg >= :minRating)
         """)
     Page<Product> searchProductsWithoutKeyword(
             @Param("status") ProductStatus status,
@@ -38,6 +40,8 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
             @Param("sellerId") Long sellerId,
             @Param("minPrice") BigDecimal minPrice,
             @Param("maxPrice") BigDecimal maxPrice,
+            @Param("brand") String brand,
+            @Param("minRating") BigDecimal minRating,
             Pageable pageable
     );
 
@@ -66,6 +70,8 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
           AND (:sellerId IS NULL OR p.seller_id = :sellerId)
           AND (:minPrice IS NULL OR p.min_price >= :minPrice)
           AND (:maxPrice IS NULL OR p.max_price <= :maxPrice)
+          AND (:brand IS NULL OR p.brand = :brand)
+          AND (:minRating IS NULL OR p.rating_avg >= :minRating)
           AND (
             p.search_vector @@ websearch_to_tsquery('simple', public.immutable_unaccent(:q))
             OR (:q_len < 2 AND (
@@ -85,6 +91,8 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
           AND (:sellerId IS NULL OR p.seller_id = :sellerId)
           AND (:minPrice IS NULL OR p.min_price >= :minPrice)
           AND (:maxPrice IS NULL OR p.max_price <= :maxPrice)
+          AND (:brand IS NULL OR p.brand = :brand)
+          AND (:minRating IS NULL OR p.rating_avg >= :minRating)
           AND (
             p.search_vector @@ websearch_to_tsquery('simple', public.immutable_unaccent(:q))
             OR (:q_len < 2 AND (
@@ -99,6 +107,8 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
             @Param("sellerId") Long sellerId,
             @Param("minPrice") BigDecimal minPrice,
             @Param("maxPrice") BigDecimal maxPrice,
+            @Param("brand") String brand,
+            @Param("minRating") BigDecimal minRating,
             @Param("q") String q,
             @Param("q_len") int qLen,
             Pageable pageable

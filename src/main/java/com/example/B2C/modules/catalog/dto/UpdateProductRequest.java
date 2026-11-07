@@ -10,6 +10,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 @Builder
@@ -43,4 +44,7 @@ public class UpdateProductRequest {
     private BigDecimal lengthCm;
     private BigDecimal widthCm;
     private BigDecimal heightCm;
+
+    private List<ProductOptionRequest> options;
+    private List<ProductVariantRequest> variants;
 }

@@ -94,4 +94,23 @@ public class SseEmitterRegistry {
         List<SseEmitter> list = emitters.get(topic);
         return list == null ? 0 : list.size();
     }
+
+    /**
+     * Periodic ping every 15 seconds to prevent browser/proxy timeout on long-lived SSE streams.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 15000)
+    public void sendHeartbeats() {
+        if (emitters.isEmpty()) return;
+        for (Map.Entry<String, List<SseEmitter>> entry : emitters.entrySet()) {
+            List<SseEmitter> list = entry.getValue();
+            if (list == null || list.isEmpty()) continue;
+            for (SseEmitter emitter : list) {
+                try {
+                    emitter.send(SseEmitter.event().comment("ping"));
+                } catch (Exception ex) {
+                    list.remove(emitter);
+                }
+            }
+        }
+    }
 }

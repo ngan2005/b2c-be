@@ -47,12 +47,12 @@ public class E3OptimisticRetryStrategy implements InventoryStrategy {
                 ProductVariant fresh = repository.findById(variantId)
                         .orElseThrow(() -> new OutOfStockException(
                                 "Variant " + variantId + " not found"));
-                if (fresh.getStockQuantity() < qty) {
+                int reserved = fresh.getReservedQuantity() == null ? 0 : fresh.getReservedQuantity();
+                int available = fresh.getStockQuantity() - reserved;
+                if (available < qty) {
                     throw new OutOfStockException("Insufficient stock for variant " + variantId);
                 }
-                fresh.setStockQuantity(fresh.getStockQuantity() - qty);
-                fresh.setReservedQuantity(
-                        (fresh.getReservedQuantity() == null ? 0 : fresh.getReservedQuantity()) + qty);
+                fresh.setReservedQuantity(reserved + qty);
                 fresh.setLastReservedAt(LocalDateTime.now());
                 repository.saveAndFlush(fresh);
                 return;

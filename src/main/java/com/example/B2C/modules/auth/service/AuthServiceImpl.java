@@ -19,6 +19,7 @@ import com.example.B2C.modules.user.repository.UserRepository;
 import com.example.B2C.modules.user.repository.UserRoleRepository;
 import com.example.B2C.modules.user.util.UserRoleResolver;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -79,7 +80,8 @@ public class AuthServiceImpl implements AuthService {
 
         CustomUserDetails userDetails = new CustomUserDetails(savedUser);
 
-        String accessToken = jwtTokenProvider.generateToken(userDetails);
+        Map<String, Object> claims = Map.of("uid", savedUser.getId());
+        String accessToken = jwtTokenProvider.generateToken(claims, userDetails);
         String refreshToken = jwtTokenProvider.generateRefreshToken(userDetails);
 
         return AuthResponse.builder()
@@ -107,7 +109,8 @@ public class AuthServiceImpl implements AuthService {
         CustomUserDetails userDetails = (CustomUserDetails) authentication.getPrincipal();
         User user = userDetails.getUser();
 
-        String accessToken = jwtTokenProvider.generateToken(userDetails);
+        Map<String, Object> claims = Map.of("uid", user.getId());
+        String accessToken = jwtTokenProvider.generateToken(claims, userDetails);
         String refreshToken = jwtTokenProvider.generateRefreshToken(userDetails);
 
         return AuthResponse.builder()
@@ -134,9 +137,10 @@ public class AuthServiceImpl implements AuthService {
             throw new UnauthorizedException("Invalid or expired Refresh Token");
         }
 
-        String newAccessToken = jwtTokenProvider.generateToken(userDetails);
-        String newRefreshToken = jwtTokenProvider.generateRefreshToken(userDetails);
         User user = userDetails.getUser();
+        Map<String, Object> claims = Map.of("uid", user.getId());
+        String newAccessToken = jwtTokenProvider.generateToken(claims, userDetails);
+        String newRefreshToken = jwtTokenProvider.generateRefreshToken(userDetails);
 
         return AuthResponse.builder()
                 .accessToken(newAccessToken)

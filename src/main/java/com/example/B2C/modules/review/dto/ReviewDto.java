@@ -25,6 +25,15 @@ public class ReviewDto {
     @Schema(description = "Product ID", example = "10")
     private Long productId;
 
+    @Schema(description = "Product Name", example = "iPhone 15 Pro Max")
+    private String productName;
+
+    @Schema(description = "Product Slug", example = "iphone-15-pro-max")
+    private String productSlug;
+
+    @Schema(description = "Product Thumbnail URL", example = "https://example.com/thumb.jpg")
+    private String productThumbnail;
+
     @Schema(description = "Variant ID (may be null for non-variant products)", example = "15")
     private Long variantId;
 
@@ -36,6 +45,9 @@ public class ReviewDto {
 
     @Schema(description = "Seller/shop ID", example = "5")
     private Long sellerId;
+
+    @Schema(description = "Seller shop name", example = "Apple Official Store")
+    private String shopName;
 
     @Schema(description = "Star rating 1–5", example = "5")
     private Integer rating;
@@ -72,10 +84,14 @@ public class ReviewDto {
                 .id(r.getId())
                 .orderItemId(r.getOrderItem() != null ? r.getOrderItem().getId() : null)
                 .productId(r.getProduct() != null ? r.getProduct().getId() : null)
+                .productName(r.getProduct() != null ? r.getProduct().getName() : null)
+                .productSlug(r.getProduct() != null ? r.getProduct().getSlug() : null)
+                .productThumbnail(r.getProduct() != null ? r.getProduct().getThumbnailUrl() : null)
                 .variantId(r.getVariant() != null ? r.getVariant().getId() : null)
                 .reviewerName(reviewerName)
                 .reviewerAvatar(reviewerAvatar)
                 .sellerId(r.getSeller() != null ? r.getSeller().getId() : null)
+                .shopName(r.getSeller() != null ? r.getSeller().getShopName() : null)
                 .rating(r.getRating())
                 .comment(r.getComment())
                 .imageUrls(r.getImageUrls())

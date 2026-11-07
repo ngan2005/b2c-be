@@ -44,7 +44,8 @@ public class InventoryService implements InventoryPort {
         ProductVariant v = repository.findById(variantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Variant", "id: " + variantId));
         int reserved = v.getReservedQuantity() == null ? 0 : v.getReservedQuantity();
-        return Math.max(0, v.getStockQuantity() - reserved);
+        int stock = v.getStockQuantity() == null ? 0 : v.getStockQuantity();
+        return Math.max(0, stock - reserved);
     }
 
     @Override
@@ -131,7 +132,6 @@ public class InventoryService implements InventoryPort {
                             + ": only " + reserved + " reserved");
         }
         v.setReservedQuantity(reserved - qty);
-        v.setStockQuantity(v.getStockQuantity() + qty);
         repository.save(v);
         log.info("Released {} reserved units back to stock for variant {}", qty, v.getId());
     }
@@ -144,7 +144,7 @@ public class InventoryService implements InventoryPort {
                             + ": only " + sold + " sold");
         }
         v.setSoldCount(sold - qty);
-        v.setStockQuantity(v.getStockQuantity() + qty);
+        v.setStockQuantity((v.getStockQuantity() == null ? 0 : v.getStockQuantity()) + qty);
         repository.save(v);
         log.info("Released {} sold units back to stock for variant {}", qty, v.getId());
     }
@@ -160,9 +160,21 @@ public class InventoryService implements InventoryPort {
         int reserved = v.getReservedQuantity() == null ? 0 : v.getReservedQuantity();
         int toConfirm = Math.min(qty, reserved);
         v.setReservedQuantity(reserved - toConfirm);
+        v.setStockQuantity(Math.max(0, (v.getStockQuantity() == null ? 0 : v.getStockQuantity()) - toConfirm));
         v.setSoldCount((v.getSoldCount() == null ? 0 : v.getSoldCount()) + toConfirm);
         repository.save(v);
         log.info("Confirmed {} units as sold for variant {}", toConfirm, variantId);
+    }
+
+    @Transactional
+    public void resetStockForExperiment(Long variantId, int stock) {
+        ProductVariant v = repository.findById(variantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Variant", "id: " + variantId));
+        v.setStockQuantity(Math.max(0, stock));
+        v.setReservedQuantity(0);
+        v.setSoldCount(0);
+        repository.save(v);
+        log.info("Reset stock for variant {} to {} (reserved=0)", variantId, stock);
     }
 
     /**

@@ -40,6 +40,7 @@ class ProductServiceImplTest {
     @Mock private ProductImageRepository productImageRepository;
     @Mock private ProductOptionRepository productOptionRepository;
     @Mock private ProductOptionValueRepository productOptionValueRepository;
+    @Mock private VariantOptionValueRepository variantOptionValueRepository;
     @Mock private CategoryRepository categoryRepository;
     @Mock private com.example.B2C.modules.seller.repository.SellerRepository sellerRepository;
     @Mock private com.example.B2C.realtime.UserPresenceService userPresenceService;
@@ -108,7 +109,8 @@ class ProductServiceImplTest {
         when(productRepository.searchProductsFulltext(
                 eq(ProductStatus.ACTIVE.name()), eq(10L), eq(1L),
                 eq(new BigDecimal("10000000")), eq(new BigDecimal("50000000")),
-                eq("iphone"), eq(7), any(Pageable.class))
+                isNull(), isNull(),
+                eq("iphone"), eq(6), any(Pageable.class))
         ).thenReturn(page);
 
         PageResponse<ProductSummaryDto> result = productService.searchProducts(request);
@@ -122,7 +124,8 @@ class ProductServiceImplTest {
         verify(productRepository).searchProductsFulltext(
                 eq(ProductStatus.ACTIVE.name()), eq(10L), eq(1L),
                 eq(new BigDecimal("10000000")), eq(new BigDecimal("50000000")),
-                eq("iphone"), eq(7), any(Pageable.class));
+                isNull(), isNull(),
+                eq("iphone"), eq(6), any(Pageable.class));
     }
 
     @Test
@@ -144,7 +147,7 @@ class ProductServiceImplTest {
         ProductSearchRequest request = ProductSearchRequest.builder().build();
 
         Page<Product> emptyPage = new PageImpl<>(List.of(), PageRequest.of(0, 20), 0);
-        when(productRepository.searchProductsWithoutKeyword(any(), any(), any(), any(), any(), any()))
+        when(productRepository.searchProductsWithoutKeyword(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(emptyPage);
 
         PageResponse<ProductSummaryDto> result = productService.searchProducts(request);
@@ -161,12 +164,12 @@ class ProductServiceImplTest {
                 .build();
 
         Page<Product> emptyPage = new PageImpl<>(List.of(), PageRequest.of(0, 100), 0);
-        when(productRepository.searchProductsWithoutKeyword(any(), any(), any(), any(), any(), any()))
+        when(productRepository.searchProductsWithoutKeyword(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(emptyPage);
 
         productService.searchProducts(request);
 
-        verify(productRepository).searchProductsWithoutKeyword(any(), any(), any(), any(), any(),
+        verify(productRepository).searchProductsWithoutKeyword(any(), any(), any(), any(), any(), any(), any(),
                 argThat((Pageable p) -> p.getPageSize() == 100));
     }
 

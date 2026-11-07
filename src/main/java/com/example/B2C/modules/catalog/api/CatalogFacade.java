@@ -33,4 +33,7 @@ public interface CatalogFacade {
 
     /** @return the main image URL of the variant, or null if not found. */
     String getImageUrl(Long variantId);
+
+    /** @return the weight in grams of the variant (or parent product), or fallback default. */
+    Integer getWeightGram(Long variantId);
 }

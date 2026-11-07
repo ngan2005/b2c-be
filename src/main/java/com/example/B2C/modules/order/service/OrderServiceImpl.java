@@ -258,39 +258,25 @@ public class OrderServiceImpl implements OrderService {
             throw new BadRequestException("None of the requested cart items were found in your cart");
         }
 
-        // Group items by seller so that one order only belongs to one seller (simplifies
-        // the experiment; in a real B2C we'd split into multiple sub-orders per seller).
-        Map<Long, List<CartItem>> bySeller = new HashMap<>();
+        // Group items by seller so that in a real B2C marketplace we split into multiple sub-orders per seller
+        Map<Long, List<CartItem>> bySeller = new java.util.LinkedHashMap<>();
         for (CartItem ci : cartItems) {
             Long sellerId = catalogFacade.getSellerIdForVariant(ci.getVariantId());
             bySeller.computeIfAbsent(sellerId, k -> new java.util.ArrayList<>())
                     .add(ci);
         }
-        if (bySeller.size() > 1) {
-            throw new BadRequestException(
-                    "Cart items must belong to a single seller for this checkout. "
-                            + "Found " + bySeller.size() + " sellers.");
-        }
-        Long sellerId = bySeller.keySet().iterator().next();
 
-        // Reserve stock for all items BEFORE creating the order — if reservation
-        // fails for any item, the entire transaction rolls back.
+        // Reserve stock for all items across all sellers BEFORE creating orders
         for (CartItem ci : cartItems) {
             inventoryPort.reserve(ci.getVariantId(), ci.getQuantity(), null);
         }
 
-        // Compute totals before persisting so subtotal/total are correct on the
-        // first INSERT (no need for a follow-up UPDATE).
-        BigDecimal subtotal = BigDecimal.ZERO;
-        for (CartItem ci : cartItems) {
-            BigDecimal unitPrice = ci.getPriceSnapshot();
-            BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(ci.getQuantity()));
-            subtotal = subtotal.add(lineTotal);
-        }
-        BigDecimal shippingFee = BigDecimal.valueOf(30000);
-        BigDecimal discount = BigDecimal.ZERO;
-        com.example.B2C.modules.promotion.entity.Promotion appliedPromotion = null;
+        List<Order> createdOrders = new java.util.ArrayList<>();
+        List<List<OrderItem>> createdOrderItems = new java.util.ArrayList<>();
+        String primaryPaymentUrl = null;
 
+        // Process promotion if any (applies to first eligible order or platform discount)
+        com.example.B2C.modules.promotion.entity.Promotion appliedPromotion = null;
         if (request.getVoucherCode() != null && !request.getVoucherCode().trim().isEmpty()) {
             String code = request.getVoucherCode().trim().toUpperCase();
             appliedPromotion = promotionRepository.findByCode(code)
@@ -306,138 +292,137 @@ public class OrderServiceImpl implements OrderService {
             if (appliedPromotion.getQuantity() != null && appliedPromotion.getUsedCount() >= appliedPromotion.getQuantity()) {
                 throw new BadRequestException("Mã giảm giá đã hết lượt sử dụng.");
             }
+        }
 
-            if (appliedPromotion.getMinOrderValue() != null && subtotal.compareTo(appliedPromotion.getMinOrderValue()) < 0) {
-                throw new BadRequestException("Đơn hàng chưa đạt giá trị tối thiểu " + appliedPromotion.getMinOrderValue() + "đ để áp dụng mã.");
+        int sellerIndex = 0;
+        for (Map.Entry<Long, List<CartItem>> entry : bySeller.entrySet()) {
+            Long sId = entry.getKey();
+            List<CartItem> sItems = entry.getValue();
+
+            BigDecimal sSubtotal = BigDecimal.ZERO;
+            for (CartItem ci : sItems) {
+                BigDecimal unitPrice = ci.getPriceSnapshot();
+                BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(ci.getQuantity()));
+                sSubtotal = sSubtotal.add(lineTotal);
             }
 
-            if (appliedPromotion.getSeller() != null && !appliedPromotion.getSeller().getId().equals(sellerId)) {
-                throw new BadRequestException("Mã giảm giá chỉ áp dụng cho sản phẩm của shop " + appliedPromotion.getSeller().getShopName());
+            BigDecimal sShippingFee = calculateShippingFee(sId, address, sItems);
+            BigDecimal sDiscount = BigDecimal.ZERO;
+
+            if (appliedPromotion != null) {
+                boolean eligibleForSeller = (appliedPromotion.getSeller() == null || appliedPromotion.getSeller().getId().equals(sId));
+                if (eligibleForSeller && (appliedPromotion.getMinOrderValue() == null || sSubtotal.compareTo(appliedPromotion.getMinOrderValue()) >= 0)) {
+                    sDiscount = promotionService.computeDiscount(appliedPromotion, sSubtotal);
+                    promotionService.incrementUsedCount(appliedPromotion.getId());
+                    appliedPromotion = null; // Used once
+                }
             }
 
-            discount = promotionService.computeDiscount(appliedPromotion, subtotal);
-        }
+            BigDecimal sTotal = sSubtotal.add(sShippingFee).subtract(sDiscount);
+            if (sTotal.compareTo(BigDecimal.ZERO) < 0) {
+                sTotal = BigDecimal.ZERO;
+            }
 
-        BigDecimal total = subtotal.add(shippingFee).subtract(discount);
-        if (total.compareTo(BigDecimal.ZERO) < 0) {
-            total = BigDecimal.ZERO;
-        }
+            String sOrderCode = "ORD-" + LocalDateTime.now().getYear() + "-"
+                    + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+            String sIdempotencyKey = (sellerIndex == 0) ? resolvedKey : (resolvedKey + "-S" + sellerIndex);
 
-        // Build the order with totals already populated. Note that orderCode uses
-        // LocalDateTime.now(); the unique constraint is on orderCode and we accept
-        // the negligible collision risk for a human-readable code.
-        Order order = Order.builder()
-                .orderCode("ORD-" + LocalDateTime.now().getYear() + "-"
-                        + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
-                .buyerId(userId)
-                .sellerId(sellerId)
-                .receiverName(address.getRecipientName())
-                .receiverPhone(address.getPhone())
-                .shippingAddress(address.getFullAddress())
-                .paymentMethod(request.getPaymentMethod())
-                .paymentStatus("UNPAID")
-                .status(OrderStatus.PENDING)
-                .idempotencyKey(resolvedKey)
-                .subtotal(subtotal)
-                .shippingFee(shippingFee)
-                .discountAmount(discount)
-                .totalAmount(total)
-                .note(request.getNote())
-                .build();
+            Order sOrder = Order.builder()
+                    .orderCode(sOrderCode)
+                    .buyerId(userId)
+                    .sellerId(sId)
+                    .receiverName(address.getRecipientName())
+                    .receiverPhone(address.getPhone())
+                    .shippingAddress(address.getFullAddress())
+                    .paymentMethod(request.getPaymentMethod())
+                    .paymentStatus("UNPAID")
+                    .status(OrderStatus.PENDING)
+                    .idempotencyKey(sIdempotencyKey)
+                    .subtotal(sSubtotal)
+                    .shippingFee(sShippingFee)
+                    .discountAmount(sDiscount)
+                    .totalAmount(sTotal)
+                    .note(request.getNote())
+                    .build();
 
-        // Persist the order FIRST so it gets an ID we can attach to OrderItems.
-        Order saved = orderRepository.save(order);
+            Order savedOrder = orderRepository.save(sOrder);
+            createdOrders.add(savedOrder);
 
-        // Deduct promotion usage count
-        if (appliedPromotion != null) {
-            promotionService.incrementUsedCount(appliedPromotion.getId());
-        }
+            List<OrderItem> oItems = new java.util.ArrayList<>(sItems.size());
+            for (CartItem ci : sItems) {
+                var variantView = catalogFacade.getVariant(ci.getVariantId());
+                BigDecimal unitPrice = ci.getPriceSnapshot();
+                BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(ci.getQuantity()));
 
-        // Build & save OrderItems now that saved.id is known. Use saveAll for a
-        // single round-trip, then flush so that a later failure surfaces immediately
-        // and the transaction can be rolled back as a unit.
-        List<OrderItem> items = new java.util.ArrayList<>(cartItems.size());
-        for (CartItem ci : cartItems) {
-            var variantView = catalogFacade.getVariant(ci.getVariantId());
-            BigDecimal unitPrice = ci.getPriceSnapshot();
-            BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(ci.getQuantity()));
-            items.add(OrderItem.builder()
-                    .orderId(saved.getId())
-                    .variantId(variantView.id())
-                    .productId(variantView.productId())
-                    .productName(variantView.productName())
-                    .variantName(variantView.variantName())
-                    .imageUrl(variantView.imageUrl())
-                    .unitPrice(unitPrice)
-                    .quantity(ci.getQuantity())
-                    .totalPrice(lineTotal)
-                    .isReviewed(false)
-                    .build());
-        }
-        orderItemRepository.saveAll(items);
-        orderItemRepository.flush();
+                String variantDisplay = variantView.variantName();
+                int weight = catalogFacade.getWeightGram(variantView.id());
+                if (variantDisplay != null && !variantDisplay.isBlank()) {
+                    if (weight > 0 && !variantDisplay.contains("g")) {
+                        variantDisplay = variantDisplay + " (" + weight + "g)";
+                    }
+                } else {
+                    variantDisplay = (weight > 0) ? ("Mặc định (" + weight + "g)") : "Mặc định";
+                }
 
-        // Reload persisted items for the response DTO (available in all code paths below)
-        List<OrderItem> persistedItems = orderItemRepository.findByOrderId(saved.getId());
+                oItems.add(OrderItem.builder()
+                        .orderId(savedOrder.getId())
+                        .variantId(variantView.id())
+                        .productId(variantView.productId())
+                        .productName(variantView.productName())
+                        .variantName(variantDisplay)
+                        .imageUrl(variantView.imageUrl())
+                        .unitPrice(unitPrice)
+                        .quantity(ci.getQuantity())
+                        .totalPrice(lineTotal)
+                        .isReviewed(false)
+                        .build());
+            }
+            orderItemRepository.saveAll(oItems);
+            orderItemRepository.flush();
+            createdOrderItems.add(oItems);
 
-        // Create pending payment record
-        String provider;
-        String txnRef = null;
-        Payment payment = Payment.builder()
-                .order(saved)
-                .method(request.getPaymentMethod())
-                .provider(null)   // set below after we know which gateway
-                .amount(total)
-                .status(PaymentTransactionStatus.PENDING)
-                .build();
+            Payment payment = Payment.builder()
+                    .order(savedOrder)
+                    .method(request.getPaymentMethod())
+                    .amount(sTotal)
+                    .status(PaymentTransactionStatus.PENDING)
+                    .build();
 
-        if ("VNPAY".equalsIgnoreCase(request.getPaymentMethod())) {
-            // Consume cart items before redirecting to VNPay
-            cartItemRepository.deleteAll(cartItems);
-            provider = "VNPAY";
-            String clientIp = resolveClientIp(request);
-            try {
-                String paymentUrl = vnpayService.createPaymentUrl(saved, clientIp);
-                payment.setProvider(provider);
+            if ("VNPAY".equalsIgnoreCase(request.getPaymentMethod())) {
+                String clientIp = resolveClientIp(request);
+                try {
+                    String paymentUrl = vnpayService.createPaymentUrl(savedOrder, clientIp);
+                    payment.setProvider("VNPAY");
+                    paymentRepository.save(payment);
+                    if (primaryPaymentUrl == null) primaryPaymentUrl = paymentUrl;
+                } catch (Exception e) {
+                    payment.setProvider("VNPAY_PENDING");
+                    paymentRepository.save(payment);
+                }
+            } else {
+                payment.setProvider("MOCK");
                 paymentRepository.save(payment);
-                log.info("VNPay payment URL generated for order {}: {}", saved.getOrderCode(), paymentUrl);
-                eventPublisher.publishEvent(new OrderCreatedEvent(this, saved.getId(), userId, sellerId));
-                eventPublisher.publishEvent(
-                        new com.example.B2C.realtime.event.OrderCreatedEvent(
-                                saved.getId(), saved.getOrderCode(), userId, sellerId, total, Instant.now()));
-                log.info("Order {} created for buyer {} with total {} (seller {})",
-                        saved.getOrderCode(), userId, total, sellerId);
-                return toDetailDto(saved, persistedItems, paymentUrl);
-            } catch (Exception e) {
-                log.error("Failed to generate VNPay URL for order {}: {}", saved.getOrderCode(), e.getMessage(), e);
-                // Fall through: keep payment as PENDING, buyer can retry from order detail
-                payment.setProvider("VNPAY_PENDING");
-                paymentRepository.save(payment);
-                eventPublisher.publishEvent(new OrderCreatedEvent(this, saved.getId(), userId, sellerId));
-                eventPublisher.publishEvent(
-                        new com.example.B2C.realtime.event.OrderCreatedEvent(
-                                saved.getId(), saved.getOrderCode(), userId, sellerId, total, Instant.now()));
-                log.info("Order {} created for buyer {} with total {} (seller {})",
-                        saved.getOrderCode(), userId, total, sellerId);
-                return toDetailDto(saved, persistedItems, null);
             }
-        } else {
-            // COD, MOMO, CARD — no redirect needed
-            provider = "MOCK";
-            payment.setProvider(provider);
-            paymentRepository.save(payment);
+
+            eventPublisher.publishEvent(new OrderCreatedEvent(this, savedOrder.getId(), userId, sId));
+            eventPublisher.publishEvent(
+                    new com.example.B2C.realtime.event.OrderCreatedEvent(
+                            savedOrder.getId(), savedOrder.getOrderCode(), userId, sId, sTotal, Instant.now()));
+
+            log.info("Sub-order {} created for seller {} (buyer {}, total {})",
+                    savedOrder.getOrderCode(), sId, userId, sTotal);
+            sellerIndex++;
         }
 
-        // Consume cart items
+        // Consume all checked-out cart items across all sellers
         cartItemRepository.deleteAll(cartItems);
 
-        eventPublisher.publishEvent(new OrderCreatedEvent(this, saved.getId(), userId, sellerId));
-        eventPublisher.publishEvent(
-                new com.example.B2C.realtime.event.OrderCreatedEvent(
-                        saved.getId(), saved.getOrderCode(), userId, sellerId, total, Instant.now()));
-        log.info("Order {} created for buyer {} with total {} (seller {})",
-                saved.getOrderCode(), userId, total, sellerId);
-        return toDetailDto(saved, persistedItems);
+        // Return details of primary order (or first order)
+        Order primaryOrder = createdOrders.get(0);
+        List<OrderItem> primaryItems = createdOrderItems.get(0);
+        return (primaryPaymentUrl != null)
+                ? toDetailDto(primaryOrder, primaryItems, primaryPaymentUrl)
+                : toDetailDto(primaryOrder, primaryItems);
     }
 
     @Override
@@ -446,7 +431,7 @@ public class OrderServiceImpl implements OrderService {
         int s = clampSize(size);
         var pageable = PageRequest.of(p, s, Sort.by(Sort.Direction.DESC, "createdAt"));
         Page<Order> orders = orderRepository.findByBuyer(userId, status, pageable);
-        return PageResponse.of(orders.map(OrderSummaryDto::from));
+        return PageResponse.of(orders.map(o -> enrichSummary(o, OrderSummaryDto.from(o))));
     }
 
     @Override
@@ -636,5 +621,144 @@ public class OrderServiceImpl implements OrderService {
             return request.getClientIp();
         }
         return "127.0.0.1";
+    }
+
+    // ── P0.2: Enrich OrderSummaryDto with seller + first-item display info ──────
+
+    private OrderSummaryDto enrichSummary(Order order, OrderSummaryDto dto) {
+        try {
+            sellerRepository.findById(order.getSellerId()).ifPresent(s -> dto.setShopName(s.getShopName()));
+        } catch (Exception ignored) {}
+        try {
+            List<OrderItem> items = orderItemRepository.findByOrderId(order.getId());
+            if (!items.isEmpty()) {
+                OrderItem first = items.get(0);
+                dto.setFirstProductName(first.getProductName());
+                dto.setFirstProductThumbnail(first.getImageUrl());
+                dto.setFirstVariantName(first.getVariantName());
+                dto.setTotalItemsCount(items.size());
+            }
+        } catch (Exception ignored) {}
+        return dto;
+    }
+
+    // ── P1.2: Retry payment for buyer ──────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public String retryPaymentForBuyer(Long userId, Long orderId, String clientIp) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order", "id: " + orderId));
+        if (!userId.equals(order.getBuyerId())) {
+            throw new ForbiddenException("You do not own this order");
+        }
+        if (order.getStatus() != OrderStatus.PENDING || !"UNPAID".equals(order.getPaymentStatus())) {
+            throw new BadRequestException("Order is not in a payable state (must be PENDING + UNPAID)");
+        }
+        String ip = (clientIp != null && !clientIp.isBlank()) ? clientIp : "127.0.0.1";
+        return vnpayService.createPaymentUrl(order, ip);
+    }
+
+    // ── P2.1: Preview order (in-memory, no DB write) ────────────────────────────
+
+    @Override
+    public com.example.B2C.modules.order.dto.OrderPreviewResponse previewOrder(
+            Long userId,
+            com.example.B2C.modules.order.dto.PreviewOrderRequest req) {
+
+        Cart cart = cartRepository.findByUserId(userId)
+                .orElseThrow(() -> new BadRequestException("Cart not found"));
+
+        List<CartItem> items = cartItemRepository.findByCartId(cart.getId()).stream()
+                .filter(ci -> req.getCartItemIds() != null && req.getCartItemIds().contains(ci.getId()))
+                .toList();
+        if (items.isEmpty()) {
+            throw new BadRequestException("No matching cart items found");
+        }
+
+        BigDecimal subtotal = BigDecimal.ZERO;
+        for (CartItem ci : items) {
+            BigDecimal unit = ci.getPriceSnapshot() != null ? ci.getPriceSnapshot() : BigDecimal.ZERO;
+            subtotal = subtotal.add(unit.multiply(BigDecimal.valueOf(ci.getQuantity())));
+        }
+
+        // Group items by seller to calculate shipping fee accurately per shop package
+        Map<Long, List<CartItem>> bySeller = new java.util.HashMap<>();
+        for (CartItem ci : items) {
+            Long sId = catalogFacade.getSellerIdForVariant(ci.getVariantId());
+            bySeller.computeIfAbsent(sId, k -> new java.util.ArrayList<>()).add(ci);
+        }
+
+        Address buyerAddress = (req.getAddressId() != null)
+                ? addressRepository.findById(req.getAddressId()).orElse(null)
+                : null;
+        BigDecimal shippingFee = BigDecimal.ZERO;
+        for (Map.Entry<Long, List<CartItem>> entry : bySeller.entrySet()) {
+            shippingFee = shippingFee.add(calculateShippingFee(entry.getKey(), buyerAddress, entry.getValue()));
+        }
+        BigDecimal discount = BigDecimal.ZERO;
+
+        if (req.getVoucherCode() != null && !req.getVoucherCode().trim().isEmpty()) {
+            String code = req.getVoucherCode().trim().toUpperCase();
+            try {
+                var promo = promotionRepository.findByCode(code).orElse(null);
+                if (promo != null
+                        && promo.getStatus() == com.example.B2C.modules.promotion.entity.PromotionStatus.ACTIVE) {
+                    discount = promotionService.computeDiscount(promo, subtotal);
+                }
+            } catch (Exception ignored) {}
+        }
+
+        BigDecimal total = subtotal.add(shippingFee).subtract(discount).max(BigDecimal.ZERO);
+
+        return com.example.B2C.modules.order.dto.OrderPreviewResponse.builder()
+                .subtotal(subtotal)
+                .shippingFee(shippingFee)
+                .discountAmount(discount)
+                .totalAmount(total)
+                .build();
+    }
+
+    /**
+     * Dynamic weight-based and location-based shipping fee calculation.
+     * Tiered pricing:
+     * - Same province: 20,000 VND (up to 1kg), +3,000 VND per extra 500g
+     * - Different province: 35,000 VND (up to 1kg), +5,000 VND per extra 500g
+     */
+    private BigDecimal calculateShippingFee(Long sellerId, Address buyerAddress, List<CartItem> cartItems) {
+        int totalWeightGram = 0;
+        for (CartItem ci : cartItems) {
+            int unitWeight = catalogFacade.getWeightGram(ci.getVariantId());
+            totalWeightGram += unitWeight * ci.getQuantity();
+        }
+
+        boolean isSameProvince = false;
+        if (buyerAddress != null && sellerId != null) {
+            Seller seller = sellerRepository.findById(sellerId).orElse(null);
+            if (seller != null && seller.getPickupAddress() != null) {
+                String sellerProvince = seller.getPickupAddress().getProvinceCode();
+                String buyerProvince = buyerAddress.getProvinceCode();
+                if (sellerProvince != null && buyerProvince != null && !sellerProvince.isBlank()) {
+                    isSameProvince = sellerProvince.trim().equalsIgnoreCase(buyerProvince.trim());
+                } else if (seller.getPickupAddress().getFullAddress() != null && buyerAddress.getFullAddress() != null) {
+                    String sAddr = seller.getPickupAddress().getFullAddress().toLowerCase();
+                    String bAddr = buyerAddress.getFullAddress().toLowerCase();
+                    isSameProvince = (sAddr.contains("hồ chí minh") && bAddr.contains("hồ chí minh"))
+                            || (sAddr.contains("hà nội") && bAddr.contains("hà nội"))
+                            || (sAddr.contains("đà nẵng") && bAddr.contains("đà nẵng"));
+                }
+            }
+        }
+
+        long baseFee = isSameProvince ? 20_000L : 35_000L;
+        long extraRate = isSameProvince ? 3_000L : 5_000L;
+
+        if (totalWeightGram > 1000) {
+            int extraGrams = totalWeightGram - 1000;
+            long extraSteps = (extraGrams + 499) / 500;
+            baseFee += extraSteps * extraRate;
+        }
+
+        return BigDecimal.valueOf(baseFee);
     }
 }

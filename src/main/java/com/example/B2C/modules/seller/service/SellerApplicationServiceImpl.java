@@ -293,12 +293,13 @@ public class SellerApplicationServiceImpl implements SellerApplicationService {
         if (!user.hasRole(RoleCode.SELLER.name())) {
             Role sellerRole = roleRepository.findByCode(RoleCode.SELLER.name())
                     .orElseThrow(() -> new IllegalStateException("SELLER role not found in database"));
-            UserRole userRole = UserRole.builder()
-                    .userId(user.getId())
-                    .roleId(sellerRole.getId())
-                    .build();
-            userRoleRepository.save(userRole);
-            user.getRoles().add(sellerRole);
+            if (!userRoleRepository.existsByUserIdAndRoleId(user.getId(), sellerRole.getId())) {
+                UserRole userRole = UserRole.builder()
+                        .userId(user.getId())
+                        .roleId(sellerRole.getId())
+                        .build();
+                userRoleRepository.save(userRole);
+            }
             // Keep legacy single-role column in sync so AuthResponse.role reports SELLER
             user.setRole(sellerRole);
             userRepository.save(user);
@@ -310,6 +311,10 @@ public class SellerApplicationServiceImpl implements SellerApplicationService {
         String accessToken = jwtTokenProvider.generateToken(userDetails);
         String refreshToken = jwtTokenProvider.generateRefreshToken(userDetails);
 
+        List<String> updatedRoles = new java.util.ArrayList<>();
+        updatedRoles.add(RoleCode.SELLER.name());
+        updatedRoles.add(RoleCode.BUYER.name());
+
         AuthResponse authResponse = AuthResponse.builder()
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
@@ -317,8 +322,8 @@ public class SellerApplicationServiceImpl implements SellerApplicationService {
                 .userId(user.getId())
                 .email(user.getEmail())
                 .fullName(user.getFullName())
-                .role(UserRoleResolver.getHighestRoleCode(user))
-                .roles(UserRoleResolver.getAllRoleCodes(user))
+                .role(RoleCode.SELLER.name())
+                .roles(updatedRoles)
                 .build();
 
         log.info("Quick-upgrade completed: userId={}, sellerId={}", userId, savedSeller.getId());

@@ -113,7 +113,7 @@ public class LoadTestRunner {
 
         ProductVariant v = variantRepository.findById(variantId)
                 .orElseThrow(() -> new IllegalArgumentException("Variant " + variantId + " not found"));
-        int initialStock = v.getStockQuantity();
+        int initialStock = Math.max(0, v.getStockQuantity() - (v.getReservedQuantity() == null ? 0 : v.getReservedQuantity()));
         int totalAttempts = concurrency * perThread;
 
         ExecutorService pool = Executors.newFixedThreadPool(concurrency);
@@ -183,7 +183,7 @@ public class LoadTestRunner {
         // persistence context may cache the entity loaded at the top of the
         // method (or be tied to the open-in-view session if any).
         int finalStock = transactionTemplate.execute(status -> jdbc.queryForObject(
-                "SELECT stock_quantity FROM product_variant WHERE id = ?",
+                "SELECT GREATEST(0, stock_quantity - COALESCE(reserved_quantity, 0)) FROM product_variant WHERE id = ?",
                 Integer.class, variantId));
         int oversell = Math.max(0, success.get() - initialStock);
 
