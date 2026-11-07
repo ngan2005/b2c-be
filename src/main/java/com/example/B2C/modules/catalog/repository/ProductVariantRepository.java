@@ -4,6 +4,8 @@ import com.example.B2C.common.repository.BaseRepository;
 import com.example.B2C.modules.catalog.entity.ProductStatus;
 import com.example.B2C.modules.catalog.entity.ProductVariant;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -76,4 +78,62 @@ public interface ProductVariantRepository extends BaseRepository<ProductVariant,
             @Param("threshold") int threshold,
             @Param("hidden") ProductStatus hidden,
             org.springframework.data.domain.Pageable pageable);
+
+    @Query("""
+        SELECT COUNT(v) FROM ProductVariant v
+        JOIN v.product p
+        WHERE p.seller.id = :sellerId
+          AND p.deletedAt IS NULL
+        """)
+    long countTotalSkusBySellerId(@Param("sellerId") Long sellerId);
+
+    @Query("""
+        SELECT COUNT(v) FROM ProductVariant v
+        JOIN v.product p
+        WHERE p.seller.id = :sellerId
+          AND p.deletedAt IS NULL
+          AND v.stockQuantity <= 5
+          AND v.stockQuantity > 0
+        """)
+    long countLowStockBySellerId(@Param("sellerId") Long sellerId);
+
+    @Query("""
+        SELECT COUNT(v) FROM ProductVariant v
+        JOIN v.product p
+        WHERE p.seller.id = :sellerId
+          AND p.deletedAt IS NULL
+          AND v.stockQuantity = 0
+        """)
+    long countOutOfStockBySellerId(@Param("sellerId") Long sellerId);
+
+    @Query(value = """
+        SELECT v FROM ProductVariant v
+        JOIN FETCH v.product p
+        WHERE p.seller.id = :sellerId
+          AND p.deletedAt IS NULL
+          AND (:filter IS NULL OR :filter = 'ALL'
+               OR (:filter = 'LOW_STOCK' AND v.stockQuantity <= 5 AND v.stockQuantity > 0)
+               OR (:filter = 'OUT_OF_STOCK' AND v.stockQuantity = 0))
+          AND (:keyword IS NULL OR LOWER(v.sku) LIKE LOWER(CONCAT('%', :keyword, '%'))
+               OR LOWER(v.variantName) LIKE LOWER(CONCAT('%', :keyword, '%'))
+               OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
+        ORDER BY v.updatedAt DESC
+        """,
+        countQuery = """
+        SELECT COUNT(v) FROM ProductVariant v
+        JOIN v.product p
+        WHERE p.seller.id = :sellerId
+          AND p.deletedAt IS NULL
+          AND (:filter IS NULL OR :filter = 'ALL'
+               OR (:filter = 'LOW_STOCK' AND v.stockQuantity <= 5 AND v.stockQuantity > 0)
+               OR (:filter = 'OUT_OF_STOCK' AND v.stockQuantity = 0))
+          AND (:keyword IS NULL OR LOWER(v.sku) LIKE LOWER(CONCAT('%', :keyword, '%'))
+               OR LOWER(v.variantName) LIKE LOWER(CONCAT('%', :keyword, '%'))
+               OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
+        """)
+    Page<ProductVariant> findSellerVariants(
+            @Param("sellerId") Long sellerId,
+            @Param("filter") String filter,
+            @Param("keyword") String keyword,
+            Pageable pageable);
 }
