@@ -116,10 +116,11 @@ public class LoadTestRunner {
         int initialStock = Math.max(0, v.getStockQuantity() - (v.getReservedQuantity() == null ? 0 : v.getReservedQuantity()));
         int totalAttempts = concurrency * perThread;
 
-        ExecutorService pool = Executors.newFixedThreadPool(concurrency);
-        CountDownLatch ready = new CountDownLatch(concurrency);
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(concurrency);
+        // Cap worker threads to 10 so we never exhaust HikariCP (pool size 30).
+        // This keeps 20 connections free for web requests, admin endpoints, and WebSockets.
+        int workerThreads = Math.min(Math.max(1, concurrency), 10);
+        ExecutorService pool = Executors.newFixedThreadPool(workerThreads);
+        CountDownLatch done = new CountDownLatch(totalAttempts);
         List<Long> latencies = Collections.synchronizedList(new ArrayList<>(totalAttempts));
         AtomicInteger success = new AtomicInteger(0);
         AtomicInteger failed = new AtomicInteger(0);
@@ -128,49 +129,34 @@ public class LoadTestRunner {
 
         long startedAt = System.nanoTime();
         LocalDateTime startedWall = LocalDateTime.now();
-        for (int i = 0; i < concurrency; i++) {
-            final int threadIndex = i;
+
+        for (int i = 0; i < totalAttempts; i++) {
+            final int idx = i;
             pool.submit(() -> {
-                ready.countDown();
+                long t0 = System.nanoTime();
                 try {
-                    start.await();
-                    for (int j = 0; j < perThread; j++) {
-                        long t0 = System.nanoTime();
-                        try {
-                            // Each reservation gets its own transaction via
-                            // TransactionTemplate. This is critical: the worker
-                            // threads are NOT participating in the outer
-                            // @Transactional of runExperiment, so a self-call
-                            // would skip the proxy and never start a tx.
-                            final int idx = threadIndex * perThread + j;
-                            transactionTemplate.executeWithoutResult(status -> {
-                                strategy.reserve(variantId, 1, (long) idx);
-                            });
-                            success.incrementAndGet();
-                        } catch (OutOfStockException ex) {
-                            failed.incrementAndGet();
-                        } catch (OptimisticLockingFailureException ex) {
-                            failed.incrementAndGet();
-                            conflicts.incrementAndGet();
-                            errors.add(ex);
-                        } catch (Throwable ex) {
-                            failed.incrementAndGet();
-                            errors.add(ex);
-                        } finally {
-                            latencies.add((System.nanoTime() - t0) / 1_000_000L);
-                        }
-                    }
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
+                    // Each reservation gets its own transaction via TransactionTemplate.
+                    transactionTemplate.executeWithoutResult(status -> {
+                        strategy.reserve(variantId, 1, (long) idx);
+                    });
+                    success.incrementAndGet();
+                } catch (OutOfStockException ex) {
+                    failed.incrementAndGet();
+                } catch (OptimisticLockingFailureException ex) {
+                    failed.incrementAndGet();
+                    conflicts.incrementAndGet();
+                    errors.add(ex);
+                } catch (Throwable ex) {
+                    failed.incrementAndGet();
+                    errors.add(ex);
                 } finally {
+                    latencies.add((System.nanoTime() - t0) / 1_000_000L);
                     done.countDown();
                 }
             });
         }
         try {
-            ready.await(30, TimeUnit.SECONDS);
-            start.countDown();
-            done.await(5, TimeUnit.MINUTES);
+            done.await(2, TimeUnit.MINUTES);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         }
