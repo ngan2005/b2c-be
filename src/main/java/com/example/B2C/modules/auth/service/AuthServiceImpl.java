@@ -18,8 +18,10 @@ import com.example.B2C.modules.user.repository.RoleRepository;
 import com.example.B2C.modules.user.repository.UserRepository;
 import com.example.B2C.modules.user.repository.UserRoleRepository;
 import com.example.B2C.modules.user.util.UserRoleResolver;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -62,21 +64,10 @@ public class AuthServiceImpl implements AuthService {
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .fullName(request.getFullName())
                 .status(UserStatus.ACTIVE)
+                .roles(new HashSet<>(Set.of(buyerRole)))
                 .build();
 
         User savedUser = userRepository.save(newUser);
-
-        // Persist the user_roles join row explicitly. The legacy code path in
-        // this method relied on the cascade declared on User.roles, but the
-        // @OneToMany + @JoinTable mapping does not reliably cascade a single
-        // managed Role into the join table when the user is created in the
-        // same transaction. We therefore write the join row directly to make
-        // the role available to security code that reads from user_roles.
-        userRoleRepository.save(UserRole.builder()
-                .userId(savedUser.getId())
-                .roleId(buyerRole.getId())
-                .build());
-        savedUser.getRoles().add(buyerRole);
 
         CustomUserDetails userDetails = new CustomUserDetails(savedUser);
 
