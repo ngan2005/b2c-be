@@ -91,21 +91,13 @@ class AuthServiceImplTest {
                 u.setId(50L);
                 return u;
             });
-            when(jwtTokenProvider.generateToken(any(CustomUserDetails.class))).thenReturn("access-token");
+            when(jwtTokenProvider.generateToken(anyMap(), any(CustomUserDetails.class))).thenReturn("access-token");
             when(jwtTokenProvider.generateRefreshToken(any(CustomUserDetails.class))).thenReturn("refresh-token");
 
             AuthResponse response = authService.register(request);
 
-            // Verify BUYER role was written to user_roles join table via userRoleRepository
-            ArgumentCaptor<UserRole> userRoleCaptor = ArgumentCaptor.forClass(UserRole.class);
-            verify(userRoleRepository).save(userRoleCaptor.capture());
-            assertThat(userRoleCaptor.getValue().getRoleId()).isEqualTo(buyerRole.getId());
-
-            verify(userRepository).save(any(User.class));
-
-            // The register method builds UserRole manually but does NOT call userRoleRepository.save
-            // It adds the role to the user's roles Set instead
-            // Let's verify the User entity saved has only BUYER in its roles set
+            // The register method populates User.roles so @OneToMany CascadeType.PERSIST
+            // writes the user_roles join row automatically without duplicate key errors.
             ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
             verify(userRepository).save(userCaptor.capture());
             User savedUser = userCaptor.getValue();
@@ -146,27 +138,17 @@ class AuthServiceImplTest {
                 u.setId(50L);
                 return u;
             });
-            when(jwtTokenProvider.generateToken(any(CustomUserDetails.class))).thenReturn("access-token");
+            when(jwtTokenProvider.generateToken(anyMap(), any(CustomUserDetails.class))).thenReturn("access-token");
             when(jwtTokenProvider.generateRefreshToken(any(CustomUserDetails.class))).thenReturn("refresh-token");
 
             authService.register(request);
 
-            // The service now persists a UserRole row via userRoleRepository.save
-            // for the BUYER join row.
-            ArgumentCaptor<UserRole> userRoleCaptor = ArgumentCaptor.forClass(UserRole.class);
-            verify(userRoleRepository).save(userRoleCaptor.capture());
-            UserRole saved = userRoleCaptor.getValue();
-            assertThat(saved.getUserId()).isEqualTo(50L);
-            assertThat(saved.getRoleId()).isEqualTo(buyerRole.getId());
-
-            // BUYER must be in the roles set (which drives the UserRole join table via JPA)
+            // BUYER must be in the roles set (which cascades to user_roles via JPA)
             ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
             verify(userRepository).save(userCaptor.capture());
 
             User savedUser = userCaptor.getValue();
-            // BUYER must be in the roles set (which drives the UserRole join table via JPA)
             assertThat(savedUser.getRoles()).anyMatch(r -> "BUYER".equals(r.getCode()));
-            // The user's primary role field must also be BUYER
             assertThat(savedUser.getRole().getCode()).isEqualTo("BUYER");
         }
     }
@@ -194,7 +176,7 @@ class AuthServiceImplTest {
                     new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
 
             when(authenticationManager.authenticate(any())).thenReturn(auth);
-            when(jwtTokenProvider.generateToken(userDetails)).thenReturn("access-token");
+            when(jwtTokenProvider.generateToken(anyMap(), eq(userDetails))).thenReturn("access-token");
             when(jwtTokenProvider.generateRefreshToken(userDetails)).thenReturn("refresh-token");
 
             LoginRequest loginRequest = new LoginRequest();
