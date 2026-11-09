@@ -25,9 +25,15 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
      */
     @Query("""
         SELECT p FROM Product p
+        LEFT JOIN p.category c
+        LEFT JOIN c.parent parent
         WHERE p.deletedAt IS NULL
           AND p.status = :status
-          AND (:categoryId IS NULL OR p.category.id = :categoryId)
+          AND (
+            :categoryId IS NULL 
+            OR c.id = :categoryId 
+            OR parent.id = :categoryId
+          )
           AND (:sellerId IS NULL OR p.seller.id = :sellerId)
           AND (:minPrice IS NULL OR p.minPrice >= :minPrice)
           AND (:maxPrice IS NULL OR p.maxPrice <= :maxPrice)
@@ -64,9 +70,14 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
      */
     @Query(value = """
         SELECT p.* FROM product p
+        LEFT JOIN category c ON p.category_id = c.id
         WHERE p.deleted_at IS NULL
           AND p.status = :status
-          AND (:categoryId IS NULL OR p.category_id = :categoryId)
+          AND (
+            CAST(:categoryId AS BIGINT) IS NULL 
+            OR p.category_id = CAST(:categoryId AS BIGINT)
+            OR c.parent_id = CAST(:categoryId AS BIGINT)
+          )
           AND (:sellerId IS NULL OR p.seller_id = :sellerId)
           AND (:minPrice IS NULL OR p.min_price >= :minPrice)
           AND (:maxPrice IS NULL OR p.max_price <= :maxPrice)
@@ -85,9 +96,14 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
         """, nativeQuery = true,
         countQuery = """
         SELECT count(p.id) FROM product p
+        LEFT JOIN category c ON p.category_id = c.id
         WHERE p.deleted_at IS NULL
           AND p.status = :status
-          AND (:categoryId IS NULL OR p.category_id = :categoryId)
+          AND (
+            CAST(:categoryId AS BIGINT) IS NULL 
+            OR p.category_id = CAST(:categoryId AS BIGINT)
+            OR c.parent_id = CAST(:categoryId AS BIGINT)
+          )
           AND (:sellerId IS NULL OR p.seller_id = :sellerId)
           AND (:minPrice IS NULL OR p.min_price >= :minPrice)
           AND (:maxPrice IS NULL OR p.max_price <= :maxPrice)
