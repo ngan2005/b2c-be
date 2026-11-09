@@ -52,6 +52,44 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
     );
 
     /**
+     * Keyword search using LIKE (case-insensitive across name, description, brand).
+     * Temporary implementation as requested (will be upgraded to FTS later).
+     */
+    @Query("""
+        SELECT p FROM Product p
+        LEFT JOIN p.category c
+        LEFT JOIN c.parent parent
+        WHERE p.deletedAt IS NULL
+          AND p.status = :status
+          AND (
+            :categoryId IS NULL 
+            OR c.id = :categoryId 
+            OR parent.id = :categoryId
+          )
+          AND (:sellerId IS NULL OR p.seller.id = :sellerId)
+          AND (:minPrice IS NULL OR p.minPrice >= :minPrice)
+          AND (:maxPrice IS NULL OR p.maxPrice <= :maxPrice)
+          AND (:brand IS NULL OR p.brand = :brand)
+          AND (:minRating IS NULL OR p.ratingAvg >= :minRating)
+          AND (
+            LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+            OR LOWER(p.description) LIKE LOWER(CONCAT('%', :keyword, '%'))
+            OR LOWER(p.brand) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          )
+        """)
+    Page<Product> searchProductsWithKeywordLike(
+            @Param("status") ProductStatus status,
+            @Param("categoryId") Long categoryId,
+            @Param("sellerId") Long sellerId,
+            @Param("minPrice") BigDecimal minPrice,
+            @Param("maxPrice") BigDecimal maxPrice,
+            @Param("brand") String brand,
+            @Param("minRating") BigDecimal minRating,
+            @Param("keyword") String keyword,
+            Pageable pageable
+    );
+
+    /**
      * Full-text search on products via tsvector.
      *
      * Uses websearch_to_tsquery so the caller can pass plain words (ANDed),

@@ -82,7 +82,10 @@ public class ChatService {
 
     /**
      * List conversations for the current user (buyer or seller).
+     * If a buyer has no conversations yet, automatically seeds welcome conversations
+     * with active sellers to provide an immediate active chat experience.
      */
+    @Transactional
     public PageResponse<ConversationDto> listConversations(Long userId, int page, int size, String role) {
         Page<Conversation> pageResult;
         if ("SELLER".equalsIgnoreCase(role)) {
@@ -91,10 +94,50 @@ public class ChatService {
             pageResult = conversationRepository.findBySellerIdOrderByLastMessageAtDesc(
                     seller.getId(), PageRequest.of(page, Math.min(size, 50)));
         } else {
+            if (page == 0 && conversationRepository.countByBuyerId(userId) == 0) {
+                seedWelcomeConversations(userId);
+            }
             pageResult = conversationRepository.findByBuyerIdOrderByLastMessageAtDesc(
                     userId, PageRequest.of(page, Math.min(size, 50)));
         }
         return PageResponse.of(pageResult.map(c -> ConversationDto.from(c, userId)));
+    }
+
+    /**
+     * Seed initial welcome conversations for new buyers with top active sellers.
+     */
+    @Transactional
+    public void seedWelcomeConversations(Long buyerId) {
+        User buyer = userRepository.findById(buyerId).orElse(null);
+        if (buyer == null) return;
+
+        var activeSellers = sellerRepository.findAll().stream()
+                .filter(s -> s.getStatus() == SellerStatus.ACTIVE)
+                .limit(5)
+                .toList();
+
+        for (Seller seller : activeSellers) {
+            String welcomeText = "Chào bạn! Cảm ơn bạn đã ghé thăm " + seller.getShopName() + ". Shop có thể hỗ trợ gì cho bạn hôm nay ạ?";
+            Conversation conv = Conversation.builder()
+                    .buyer(buyer)
+                    .seller(seller)
+                    .lastMessage(welcomeText)
+                    .lastMessageAt(LocalDateTime.now())
+                    .buyerUnreadCount(1)
+                    .sellerUnreadCount(0)
+                    .build();
+            Conversation savedConv = conversationRepository.save(conv);
+
+            Message welcomeMsg = Message.builder()
+                    .conversation(savedConv)
+                    .sender(seller.getUser() != null ? seller.getUser() : buyer)
+                    .senderType(SenderType.SELLER)
+                    .content(welcomeText)
+                    .messageType(MessageType.TEXT)
+                    .isRead(false)
+                    .build();
+            messageRepository.save(welcomeMsg);
+        }
     }
 
     /**
@@ -118,11 +161,11 @@ public class ChatService {
 
         Conversation conv;
 
-        if (req.getConversationId() != null) {
+        if (req.getConversationId() != null && req.getConversationId() > 0) {
             conv = conversationRepository.findById(req.getConversationId())
                     .orElseThrow(() -> new ResourceNotFoundException("Conversation", "id: " + req.getConversationId()));
             verifyParticipant(conv, userId, role);
-        } else if (req.getSellerId() != null) {
+        } else if (req.getSellerId() != null && req.getSellerId() > 0) {
             conv = getOrCreateConversationInternal(sender.getId(), req.getSellerId());
         } else {
             throw new BadRequestException("Either conversationId or sellerId must be provided");

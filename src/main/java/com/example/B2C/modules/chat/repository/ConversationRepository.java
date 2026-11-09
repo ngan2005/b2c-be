@@ -15,9 +15,15 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
 
     Optional<Conversation> findByBuyerIdAndSellerId(Long buyerId, Long sellerId);
 
-    @Query("SELECT c FROM Conversation c WHERE c.buyer.id = :buyerId ORDER BY c.lastMessageAt DESC")
+    long countByBuyerId(Long buyerId);
+
+    long countBySellerId(Long sellerId);
+
+    @Query(value = "SELECT c FROM Conversation c LEFT JOIN FETCH c.buyer LEFT JOIN FETCH c.seller WHERE c.buyer.id = :buyerId ORDER BY COALESCE(c.lastMessageAt, c.createdAt) DESC",
+           countQuery = "SELECT count(c) FROM Conversation c WHERE c.buyer.id = :buyerId")
     Page<Conversation> findByBuyerIdOrderByLastMessageAtDesc(@Param("buyerId") Long buyerId, Pageable pageable);
 
-    @Query("SELECT c FROM Conversation c WHERE c.seller.id = :sellerId ORDER BY c.lastMessageAt DESC")
+    @Query(value = "SELECT c FROM Conversation c LEFT JOIN FETCH c.buyer LEFT JOIN FETCH c.seller WHERE c.seller.id = :sellerId ORDER BY COALESCE(c.lastMessageAt, c.createdAt) DESC",
+           countQuery = "SELECT count(c) FROM Conversation c WHERE c.seller.id = :sellerId")
     Page<Conversation> findBySellerIdOrderByLastMessageAtDesc(@Param("sellerId") Long sellerId, Pageable pageable);
 }

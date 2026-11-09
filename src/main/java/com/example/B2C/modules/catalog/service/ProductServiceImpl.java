@@ -80,8 +80,9 @@ public class ProductServiceImpl implements ProductService {
                     pageable);
         } else {
             String trimmed = keyword.trim();
-            productPage = productRepository.searchProductsFulltext(
-                    ProductStatus.ACTIVE.name(),
+            // Tạm thời dùng LIKE theo yêu cầu (sau này sẽ nâng cấp lên FTS)
+            productPage = productRepository.searchProductsWithKeywordLike(
+                    ProductStatus.ACTIVE,
                     request.getCategoryId(),
                     request.getSellerId(),
                     request.getMinPrice(),
@@ -89,7 +90,6 @@ public class ProductServiceImpl implements ProductService {
                     request.getBrand(),
                     request.getMinRating(),
                     trimmed,
-                    trimmed.length(),
                     pageable);
         }
 
