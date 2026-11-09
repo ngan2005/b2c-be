@@ -75,7 +75,7 @@ public class SellerInventoryService {
     public SellerInventoryItemDto updateVariantStock(Long userId, Long variantId, int newStock) {
         Seller seller = getActiveSeller(userId);
 
-        ProductVariant variant = variantRepository.findById(variantId)
+        ProductVariant variant = variantRepository.findByIdForUpdate(variantId)
                 .orElseThrow(() -> new ResourceNotFoundException("ProductVariant", "id: " + variantId));
 
         if (variant.getProduct() == null || variant.getProduct().getSeller() == null
@@ -89,9 +89,11 @@ public class SellerInventoryService {
             throw new BadRequestException("Số lượng tồn kho (" + newStock + ") không thể nhỏ hơn số lượng đang giữ chỗ cho khách (" + reserved + ")");
         }
 
-        variant.setStockQuantity(newStock);
-        variant.setUpdatedAt(LocalDateTime.now());
-        ProductVariant saved = variantRepository.save(variant);
+        // Re-read or ensure latest managed entity state after reconciliation
+        ProductVariant managedVariant = variantRepository.findById(variantId).orElse(variant);
+        managedVariant.setStockQuantity(newStock);
+        managedVariant.setUpdatedAt(LocalDateTime.now());
+        ProductVariant saved = variantRepository.save(managedVariant);
 
         log.info("[SELLER_INVENTORY] Seller {} updated stock for variant {} ({}) to {}",
                 seller.getId(), variant.getId(), variant.getSku(), newStock);

@@ -3,8 +3,10 @@ package com.example.B2C.common.exception;
 import com.example.B2C.common.response.ErrorResponse;
 import com.example.B2C.common.response.FieldError;
 import io.jsonwebtoken.JwtException;
+import jakarta.persistence.OptimisticLockException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -107,6 +109,18 @@ public class GlobalExceptionHandler {
             OutOfStockException ex, HttpServletRequest request) {
         log.warn("Out of stock: {}", ex.getMessage());
         return buildError(HttpStatus.CONFLICT, ex.getMessage(), null, request);
+    }
+
+    @ExceptionHandler({
+            OptimisticLockingFailureException.class,
+            OptimisticLockException.class
+    })
+    public ResponseEntity<ErrorResponse> handleOptimisticLockConflict(
+            Exception ex, HttpServletRequest request) {
+        log.warn("Optimistic lock conflict at {}: {}", request.getRequestURI(), ex.getMessage());
+        return buildError(HttpStatus.CONFLICT,
+                "Sản phẩm đang có nhiều người cùng đặt mua hoặc tồn kho vừa thay đổi. Vui lòng thử lại sau giây lát.",
+                null, request);
     }
 
     @ExceptionHandler(BusinessException.class)
