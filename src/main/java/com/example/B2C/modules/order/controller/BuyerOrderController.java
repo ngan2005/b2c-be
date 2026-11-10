@@ -115,6 +115,14 @@ public class BuyerOrderController {
                 orderService.cancelOrderForBuyer(userId, id, reason)));
     }
 
+    @PatchMapping("/{id}/complete")
+    @Operation(summary = "Confirm order received and complete the order")
+    public ResponseEntity<ApiResponse<OrderDetailDto>> complete(@PathVariable Long id) {
+        Long userId = currentUserProvider.getCurrentUserId();
+        return ResponseEntity.ok(ApiResponse.success("Order completed",
+                orderService.completeOrderForBuyer(userId, id)));
+    }
+
     @PostMapping("/{id}/return-request")
     @Operation(summary = "Request a return for a delivered order (within 7 days of delivery)")
     public ResponseEntity<ApiResponse<OrderDetailDto>> requestReturn(

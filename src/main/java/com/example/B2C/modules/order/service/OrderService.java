@@ -44,6 +44,8 @@ public interface OrderService {
 
     OrderDetailDto cancelOrderForBuyer(Long userId, Long orderId, String reason);
 
+    OrderDetailDto completeOrderForBuyer(Long userId, Long orderId);
+
     OrderDetailDto requestReturn(Long userId, Long orderId, ReturnRequestDto request);
 
     OrderDetailDto approveReturn(Long orderId);

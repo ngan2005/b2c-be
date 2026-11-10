@@ -520,6 +520,64 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional
+    public OrderDetailDto completeOrderForBuyer(Long userId, Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order", "id: " + orderId));
+        if (!userId.equals(order.getBuyerId())) {
+            throw new ForbiddenException("You do not own this order");
+        }
+        if (order.getStatus() == OrderStatus.COMPLETED) {
+            List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
+            return toDetailDto(order, items);
+        }
+        if (order.getStatus() != OrderStatus.DELIVERED && order.getStatus() != OrderStatus.SHIPPING) {
+            throw new BadRequestException("Order in status " + order.getStatus() + " cannot be completed by buyer (must be SHIPPING or DELIVERED)");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (order.getDeliveredAt() == null) {
+            order.setDeliveredAt(now);
+        }
+        order.setStatus(OrderStatus.COMPLETED);
+        order.setCompletedAt(now);
+        if (!"PAID".equalsIgnoreCase(order.getPaymentStatus())) {
+            order.setPaymentStatus("PAID");
+            confirmStockForOrder(orderId);
+        }
+        Order saved = orderRepository.save(order);
+        log.info("Buyer {} marked order {} as COMPLETED", userId, order.getOrderCode());
+
+        List<OrderItem> itemsForCommission = orderItemRepository.findByOrderId(orderId);
+        for (OrderItem item : itemsForCommission) {
+            try {
+                commissionService.snapshotForItem(item, saved);
+            } catch (Exception ex) {
+                log.warn("Failed to snapshot commission for order_item_id={} on order {}: {}",
+                        item.getId(), orderId, ex.getMessage());
+            }
+        }
+        try {
+            java.math.BigDecimal commissionTotal = commissionRecordRepository
+                    .sumCommissionAmountByOrderId(saved.getId());
+            java.math.BigDecimal safeTotal = (commissionTotal != null) ? commissionTotal : java.math.BigDecimal.ZERO;
+            payoutService.createForCompletedOrder(saved, safeTotal);
+            if (safeTotal.compareTo(java.math.BigDecimal.ZERO) > 0) {
+                platformWalletService.credit(
+                        safeTotal,
+                        "COMMISSION",
+                        saved.getId(),
+                        saved.getSellerId(),
+                        "Auto credit on order " + saved.getOrderCode());
+            }
+        } catch (Exception ex) {
+            log.warn("Failed to create payout or credit wallet on buyer completion for order {}: {}",
+                    saved.getId(), ex.getMessage());
+        }
+
+        return toDetailDto(saved, orderItemRepository.findByOrderId(orderId));
+    }
+
+    @Override
+    @Transactional
     public OrderDetailDto requestReturn(Long userId, Long orderId, ReturnRequestDto request) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", "id: " + orderId));
