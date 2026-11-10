@@ -21,6 +21,20 @@ public interface OrderService {
 
     PageResponse<OrderSummaryDto> listOrdersForCurrentBuyer(Long userId, OrderStatus status, int page, int size);
 
+    PageResponse<OrderSummaryDto> listOrdersForCurrentBuyer(
+            Long userId,
+            OrderStatus status,
+            String search,
+            String paymentMethod,
+            java.time.LocalDateTime fromDate,
+            java.time.LocalDateTime toDate,
+            java.math.BigDecimal minAmount,
+            java.math.BigDecimal maxAmount,
+            String sortBy,
+            String sortDir,
+            int page,
+            int size);
+
     /**
      * Read-only list of orders where the user is the buyer_id.
      */

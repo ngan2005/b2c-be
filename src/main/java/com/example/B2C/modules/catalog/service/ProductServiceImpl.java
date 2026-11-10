@@ -80,8 +80,24 @@ public class ProductServiceImpl implements ProductService {
                     pageable);
         } else {
             String trimmed = keyword.trim();
-            // Tạm thời dùng LIKE theo yêu cầu (sau này sẽ nâng cấp lên FTS)
-            productPage = productRepository.searchProductsWithKeywordLike(
+            // Nâng cấp lên Full-Text Search PostgreSQL (tsvector + GIN index) kèm fallback LIKE
+            Page<Product> ftsPage = null;
+            try {
+                ftsPage = productRepository.searchProductsFulltext(
+                        ProductStatus.ACTIVE.name(),
+                        request.getCategoryId(),
+                        request.getSellerId(),
+                        request.getMinPrice(),
+                        request.getMaxPrice(),
+                        request.getBrand(),
+                        request.getMinRating(),
+                        trimmed,
+                        trimmed.length(),
+                        pageable);
+            } catch (Exception ignored) {
+            }
+
+            productPage = (ftsPage != null) ? ftsPage : productRepository.searchProductsWithKeywordLike(
                     ProductStatus.ACTIVE,
                     request.getCategoryId(),
                     request.getSellerId(),

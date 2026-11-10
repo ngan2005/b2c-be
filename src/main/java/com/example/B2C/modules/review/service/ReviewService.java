@@ -105,11 +105,16 @@ public class ReviewService {
      */
     public PageResponse<ReviewDto> listByProduct(Long productId, Integer rating, int page, int size) {
         Page<Review> reviews = reviewRepository.findByProductIdAndStatusWithOptionalRating(
-                productId, ReviewStatus.VISIBLE, rating, PageRequest.of(page, Math.min(size, 100)));
+                productId, ReviewStatus.VISIBLE, rating,
+                PageRequest.of(page, Math.min(size, 100), org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt")));
         return PageResponse.of(reviews.map(r -> {
             String reviewerName = Boolean.TRUE.equals(r.getIsAnonymous())
-                    ? "Anonymous" : r.getUser().getFullName();
-            return ReviewDto.from(r, reviewerName, r.getUser().getAvatarUrl());
+                    ? "Khách hàng ẩn danh"
+                    : (r.getUser() != null && r.getUser().getFullName() != null && !r.getUser().getFullName().isBlank()
+                            ? r.getUser().getFullName()
+                            : "Khách hàng");
+            String avatarUrl = (r.getUser() != null) ? r.getUser().getAvatarUrl() : null;
+            return ReviewDto.from(r, reviewerName, avatarUrl);
         }));
     }
 

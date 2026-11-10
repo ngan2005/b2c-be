@@ -52,14 +52,23 @@ public class BuyerOrderController {
     }
 
     @GetMapping
-    @Operation(summary = "List my orders (filter by status, paginated)")
+    @Operation(summary = "List my orders (filter by status, date, amount, payment method, paginated)")
     public ResponseEntity<ApiResponse<PageResponse<OrderSummaryDto>>> list(
             @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String paymentMethod,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) java.time.LocalDateTime fromDate,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) java.time.LocalDateTime toDate,
+            @RequestParam(required = false) java.math.BigDecimal minAmount,
+            @RequestParam(required = false) java.math.BigDecimal maxAmount,
+            @RequestParam(required = false, defaultValue = "createdAt") String sortBy,
+            @RequestParam(required = false, defaultValue = "desc") String sortDir,
             @RequestParam(required = false, defaultValue = "0") int page,
             @RequestParam(required = false, defaultValue = "20") int size) {
         Long userId = currentUserProvider.getCurrentUserId();
         return ResponseEntity.ok(ApiResponse.success(
-                orderService.listOrdersForCurrentBuyer(userId, status, page, size)));
+                orderService.listOrdersForCurrentBuyer(
+                        userId, status, search, paymentMethod, fromDate, toDate, minAmount, maxAmount, sortBy, sortDir, page, size)));
     }
 
     /**

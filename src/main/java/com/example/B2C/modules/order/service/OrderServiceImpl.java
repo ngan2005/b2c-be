@@ -439,10 +439,34 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public PageResponse<OrderSummaryDto> listOrdersForCurrentBuyer(Long userId, OrderStatus status, int page, int size) {
+        return listOrdersForCurrentBuyer(userId, status, null, null, null, null, null, null, "createdAt", "desc", page, size);
+    }
+
+    @Override
+    public PageResponse<OrderSummaryDto> listOrdersForCurrentBuyer(
+            Long userId,
+            OrderStatus status,
+            String search,
+            String paymentMethod,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            BigDecimal minAmount,
+            BigDecimal maxAmount,
+            String sortBy,
+            String sortDir,
+            int page,
+            int size) {
         int p = Math.max(page, 0);
         int s = clampSize(size);
-        var pageable = PageRequest.of(p, s, Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<Order> orders = orderRepository.findByBuyer(userId, status, pageable);
+        Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
+        String property = "totalAmount".equalsIgnoreCase(sortBy) ? "totalAmount" : "createdAt";
+        var pageable = PageRequest.of(p, s, Sort.by(direction, property));
+
+        String cleanSearch = (search != null && !search.isBlank()) ? search.trim() : null;
+        String cleanPayment = (paymentMethod != null && !paymentMethod.isBlank()) ? paymentMethod.trim() : null;
+
+        Page<Order> orders = orderRepository.findByBuyerFiltered(
+                userId, status, cleanSearch, cleanPayment, fromDate, toDate, minAmount, maxAmount, pageable);
         return PageResponse.of(orders.map(o -> enrichSummary(o, OrderSummaryDto.from(o))));
     }
 

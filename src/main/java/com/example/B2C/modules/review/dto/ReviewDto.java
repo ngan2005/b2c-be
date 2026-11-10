@@ -37,6 +37,9 @@ public class ReviewDto {
     @Schema(description = "Variant ID (may be null for non-variant products)", example = "15")
     private Long variantId;
 
+    @Schema(description = "Variant Name (e.g. Size L, Black)", example = "Đen, Size L")
+    private String variantName;
+
     @Schema(description = "Display name of the reviewer (or 'Anonymous' if isAnonymous=true)", example = "Nguyen Van A")
     private String reviewerName;
 
@@ -80,6 +83,16 @@ public class ReviewDto {
     private LocalDateTime createdAt;
 
     public static ReviewDto from(Review r, String reviewerName, String reviewerAvatar) {
+        String varName = null;
+        if (r.getVariant() != null && r.getVariant().getVariantName() != null) {
+            varName = r.getVariant().getVariantName();
+        } else if (r.getOrderItem() != null && r.getOrderItem().getVariantName() != null) {
+            varName = r.getOrderItem().getVariantName();
+        }
+
+        Long vId = r.getVariant() != null ? r.getVariant().getId()
+                : (r.getOrderItem() != null ? r.getOrderItem().getVariantId() : null);
+
         return ReviewDto.builder()
                 .id(r.getId())
                 .orderItemId(r.getOrderItem() != null ? r.getOrderItem().getId() : null)
@@ -87,7 +100,8 @@ public class ReviewDto {
                 .productName(r.getProduct() != null ? r.getProduct().getName() : null)
                 .productSlug(r.getProduct() != null ? r.getProduct().getSlug() : null)
                 .productThumbnail(r.getProduct() != null ? r.getProduct().getThumbnailUrl() : null)
-                .variantId(r.getVariant() != null ? r.getVariant().getId() : null)
+                .variantId(vId)
+                .variantName(varName)
                 .reviewerName(reviewerName)
                 .reviewerAvatar(reviewerAvatar)
                 .sellerId(r.getSeller() != null ? r.getSeller().getId() : null)

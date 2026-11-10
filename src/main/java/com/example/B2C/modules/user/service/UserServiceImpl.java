@@ -130,18 +130,18 @@ public class UserServiceImpl implements UserService {
     @Transactional
     public void changePassword(Long userId, ChangePasswordRequest request) {
         if (!request.getNewPassword().equals(request.getConfirmPassword())) {
-            throw new BadRequestException("New password and confirmation do not match");
+            throw new BadRequestException("Mật khẩu mới và xác nhận mật khẩu không khớp");
         }
 
         if (request.getCurrentPassword().equals(request.getNewPassword())) {
-            throw new BadRequestException("New password must be different from current password");
+            throw new BadRequestException("Mật khẩu mới phải khác mật khẩu hiện tại");
         }
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", userId));
 
         if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
-            throw new BadRequestException("Current password is incorrect");
+            throw new BadRequestException("Mật khẩu hiện tại không chính xác");
         }
 
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
