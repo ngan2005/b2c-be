@@ -216,23 +216,23 @@ public class ChatService {
 
     /**
      * List messages in a conversation (newest last for display).
+     * Automatically marks messages as read for the current participant.
      */
+    @Transactional
     public PageResponse<MessageDto> listMessages(Long userId, String role, Long conversationId, int page, int size) {
         Conversation conv = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation", "id: " + conversationId));
         verifyParticipant(conv, userId, role);
 
-        // Mark as read while we're here. Goes through the self proxy
-        // (not direct this call) so the @Transactional write boundary
-        // is honoured.
-        self.markConversationAsRead(conversationId, userId, LocalDateTime.now());
-        // Reset unread count for the current user
-        if ("SELLER".equalsIgnoreCase(role)) {
-            conv.setSellerUnreadCount(0);
-        } else {
+        boolean isBuyer = !"SELLER".equalsIgnoreCase(role);
+        messageRepository.markAsRead(conversationId, userId, isBuyer, LocalDateTime.now());
+
+        if (isBuyer) {
             conv.setBuyerUnreadCount(0);
+        } else {
+            conv.setSellerUnreadCount(0);
         }
-        conversationRepository.save(conv);
+        conversationRepository.saveAndFlush(conv);
 
         // Fetch in ascending order for display
         Page<Message> messages = messageRepository.findByConversationIdOrderByCreatedAtAsc(
@@ -257,9 +257,7 @@ public class ChatService {
     }
 
     /**
-     * Mark conversation messages as read. Isolated into its own method so
-     * Spring's proxy starts a fresh write transaction instead of inheriting
-     * the readOnly context of the caller (e.g. {@code listMessages}).
+     * Mark conversation messages as read.
      */
     @Transactional
     public int markConversationAsRead(Long conversationId, Long userId, LocalDateTime now) {
@@ -275,13 +273,15 @@ public class ChatService {
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation", "id: " + conversationId));
         verifyParticipant(conv, userId, role);
 
-        self.markConversationAsRead(conversationId, userId, LocalDateTime.now());
-        if ("SELLER".equalsIgnoreCase(role)) {
-            conv.setSellerUnreadCount(0);
-        } else {
+        boolean isBuyer = !"SELLER".equalsIgnoreCase(role);
+        messageRepository.markAsRead(conversationId, userId, isBuyer, LocalDateTime.now());
+
+        if (isBuyer) {
             conv.setBuyerUnreadCount(0);
+        } else {
+            conv.setSellerUnreadCount(0);
         }
-        conversationRepository.save(conv);
+        conversationRepository.saveAndFlush(conv);
     }
 
     private void verifyParticipant(Conversation conv, Long userId, String role) {
