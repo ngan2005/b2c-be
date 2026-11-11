@@ -174,4 +174,12 @@ public class ChatController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.created(
                 chatService.sendMessage(userId, detectRole(userId), request)));
     }
+
+    @PostMapping("/conversations/{id}/read")
+    @Operation(summary = "Mark all messages in a conversation as read for current user")
+    public ResponseEntity<ApiResponse<Void>> markAsRead(@PathVariable Long id) {
+        Long userId = currentUserProvider.getCurrentUserId();
+        chatService.markConversationAsRead(userId, detectRole(userId), id);
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
 }

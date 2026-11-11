@@ -266,6 +266,24 @@ public class ChatService {
         return messageRepository.markAsRead(conversationId, userId, now);
     }
 
+    /**
+     * Mark an entire conversation as read for the current participant and reset unread count.
+     */
+    @Transactional
+    public void markConversationAsRead(Long userId, String role, Long conversationId) {
+        Conversation conv = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Conversation", "id: " + conversationId));
+        verifyParticipant(conv, userId, role);
+
+        self.markConversationAsRead(conversationId, userId, LocalDateTime.now());
+        if ("SELLER".equalsIgnoreCase(role)) {
+            conv.setSellerUnreadCount(0);
+        } else {
+            conv.setBuyerUnreadCount(0);
+        }
+        conversationRepository.save(conv);
+    }
+
     private void verifyParticipant(Conversation conv, Long userId, String role) {
         if ("SELLER".equalsIgnoreCase(role)) {
             Seller seller = sellerRepository.findByUserId(userId).orElse(null);
