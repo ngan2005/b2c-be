@@ -66,6 +66,9 @@ public class OrderServiceImpl implements OrderService {
     private final SellerRepository sellerRepository;
     private final CartRepository cartRepository;
     private final com.example.B2C.modules.cart.repository.CartItemRepository cartItemRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CartService cartService;
     private final CatalogFacade catalogFacade;
     private final AddressRepository addressRepository;
     private final PaymentRepository paymentRepository;
@@ -144,8 +147,18 @@ public class OrderServiceImpl implements OrderService {
         switch (newStatus) {
             case CONFIRMED -> order.setConfirmedAt(now);
             case SHIPPING -> order.setShippedAt(now);
-            case DELIVERED -> order.setDeliveredAt(now);
-            case COMPLETED -> order.setCompletedAt(now);
+            case DELIVERED -> {
+                order.setDeliveredAt(now);
+                if (!"PAID".equalsIgnoreCase(order.getPaymentStatus())) {
+                    order.setPaymentStatus("PAID");
+                }
+            }
+            case COMPLETED -> {
+                order.setCompletedAt(now);
+                if (!"PAID".equalsIgnoreCase(order.getPaymentStatus())) {
+                    order.setPaymentStatus("PAID");
+                }
+            }
             case CANCELLED -> {
                 order.setCancelledAt(now);
                 order.setCancelReason(note);
@@ -178,52 +191,58 @@ public class OrderServiceImpl implements OrderService {
                     orderId, order.getBuyerId(), sellerId, newStatus.name()));
         }
 
-        // ── Commission snapshot & Stock confirmation on COMPLETED ──
-        // Order completion is the source of truth; commission records are derived.
-        // Failures here must NOT break order completion — log and continue.
-        if (newStatus == OrderStatus.COMPLETED) {
+        // ── Payment status update & Stock confirmation on DELIVERED or COMPLETED ──
+        if (newStatus == OrderStatus.DELIVERED || newStatus == OrderStatus.COMPLETED) {
             if (!"PAID".equalsIgnoreCase(saved.getPaymentStatus())) {
                 saved.setPaymentStatus("PAID");
                 saved = orderRepository.save(saved);
-                confirmStockForOrder(orderId);
             }
+            confirmStockForOrder(orderId);
+        }
 
-            List<OrderItem> itemsForCommission = orderItemRepository.findByOrderId(orderId);
-            for (OrderItem item : itemsForCommission) {
+        // ── Commission snapshot & Payout on COMPLETED ──
+        // Order completion is the source of truth; commission records are derived.
+        // Failures here must NOT break order completion — log and continue.
+        if (newStatus == OrderStatus.COMPLETED) {
+
+            if (saved.getSellerId() != null) {
+                List<OrderItem> itemsForCommission = orderItemRepository.findByOrderId(orderId);
+                for (OrderItem item : itemsForCommission) {
+                    try {
+                        // CommissionService.snapshotForItem is idempotent (skips if record already exists)
+                        // and guarded by a unique constraint on order_item_id.
+                        commissionService.snapshotForItem(item, saved);
+                    } catch (Exception ex) {
+                        log.warn("Failed to snapshot commission for order_item_id={} on order {}: {}",
+                                item.getId(), orderId, ex.getMessage());
+                    }
+                }
+
+                // ── Payout record + platform wallet credit on COMPLETED ──
+                // Wrapped in try/catch so that order completion is never blocked.
                 try {
-                    // CommissionService.snapshotForItem is idempotent (skips if record already exists)
-                    // and guarded by a unique constraint on order_item_id.
-                    commissionService.snapshotForItem(item, saved);
+                    // Sum total commission across all items in this order.
+                    java.math.BigDecimal commissionTotal = commissionRecordRepository
+                            .sumCommissionAmountByOrderId(saved.getId());
+                    java.math.BigDecimal safeTotal = (commissionTotal != null) ? commissionTotal : java.math.BigDecimal.ZERO;
+
+                    // Create PENDING payout record: net = order total − commission.
+                    // Idempotent — skips if a non-cancelled payout already exists for this order.
+                    payoutService.createForCompletedOrder(saved, safeTotal);
+
+                    // Credit the platform wallet with the commission amount (platform's share).
+                    if (safeTotal.compareTo(java.math.BigDecimal.ZERO) > 0) {
+                        platformWalletService.credit(
+                                safeTotal,
+                                "COMMISSION",
+                                saved.getId(),
+                                saved.getSellerId(),
+                                "Auto credit on order " + saved.getOrderCode());
+                    }
                 } catch (Exception ex) {
-                    log.warn("Failed to snapshot commission for order_item_id={} on order {}: {}",
-                            item.getId(), orderId, ex.getMessage());
+                    log.warn("Failed to create payout or credit wallet for order {}: {}",
+                            saved.getId(), ex.getMessage());
                 }
-            }
-
-            // ── Payout record + platform wallet credit on COMPLETED ──
-            // Wrapped in try/catch so that order completion is never blocked.
-            try {
-                // Sum total commission across all items in this order.
-                java.math.BigDecimal commissionTotal = commissionRecordRepository
-                        .sumCommissionAmountByOrderId(saved.getId());
-                java.math.BigDecimal safeTotal = (commissionTotal != null) ? commissionTotal : java.math.BigDecimal.ZERO;
-
-                // Create PENDING payout record: net = order total − commission.
-                // Idempotent — skips if a non-cancelled payout already exists for this order.
-                payoutService.createForCompletedOrder(saved, safeTotal);
-
-                // Credit the platform wallet with the commission amount (platform's share).
-                if (safeTotal.compareTo(java.math.BigDecimal.ZERO) > 0) {
-                    platformWalletService.credit(
-                            safeTotal,
-                            "COMMISSION",
-                            saved.getId(),
-                            saved.getSellerId(),
-                            "Auto credit on order " + saved.getOrderCode());
-                }
-            } catch (Exception ex) {
-                log.warn("Failed to create payout or credit wallet for order {}: {}",
-                        saved.getId(), ex.getMessage());
             }
         }
 
@@ -275,6 +294,11 @@ public class OrderServiceImpl implements OrderService {
         // Group items by seller so that in a real B2C marketplace we split into multiple sub-orders per seller
         Map<Long, List<CartItem>> bySeller = new java.util.LinkedHashMap<>();
         for (CartItem ci : cartItems) {
+            catalogFacade.validateVariantForPurchase(
+                    ci.getVariantId(),
+                    ci.getProductName(),
+                    ci.getVariantName(),
+                    ci.getQuantity() != null ? ci.getQuantity() : 1);
             Long sellerId = catalogFacade.getSellerIdForVariant(ci.getVariantId());
             bySeller.computeIfAbsent(sellerId, k -> new java.util.ArrayList<>())
                     .add(ci);
@@ -548,31 +572,33 @@ public class OrderServiceImpl implements OrderService {
         Order saved = orderRepository.save(order);
         log.info("Buyer {} marked order {} as COMPLETED", userId, order.getOrderCode());
 
-        List<OrderItem> itemsForCommission = orderItemRepository.findByOrderId(orderId);
-        for (OrderItem item : itemsForCommission) {
+        if (saved.getSellerId() != null) {
+            List<OrderItem> itemsForCommission = orderItemRepository.findByOrderId(orderId);
+            for (OrderItem item : itemsForCommission) {
+                try {
+                    commissionService.snapshotForItem(item, saved);
+                } catch (Exception ex) {
+                    log.warn("Failed to snapshot commission for order_item_id={} on order {}: {}",
+                            item.getId(), orderId, ex.getMessage());
+                }
+            }
             try {
-                commissionService.snapshotForItem(item, saved);
+                java.math.BigDecimal commissionTotal = commissionRecordRepository
+                        .sumCommissionAmountByOrderId(saved.getId());
+                java.math.BigDecimal safeTotal = (commissionTotal != null) ? commissionTotal : java.math.BigDecimal.ZERO;
+                payoutService.createForCompletedOrder(saved, safeTotal);
+                if (safeTotal.compareTo(java.math.BigDecimal.ZERO) > 0) {
+                    platformWalletService.credit(
+                            safeTotal,
+                            "COMMISSION",
+                            saved.getId(),
+                            saved.getSellerId(),
+                            "Auto credit on order " + saved.getOrderCode());
+                }
             } catch (Exception ex) {
-                log.warn("Failed to snapshot commission for order_item_id={} on order {}: {}",
-                        item.getId(), orderId, ex.getMessage());
+                log.warn("Failed to create payout or credit wallet on buyer completion for order {}: {}",
+                        saved.getId(), ex.getMessage());
             }
-        }
-        try {
-            java.math.BigDecimal commissionTotal = commissionRecordRepository
-                    .sumCommissionAmountByOrderId(saved.getId());
-            java.math.BigDecimal safeTotal = (commissionTotal != null) ? commissionTotal : java.math.BigDecimal.ZERO;
-            payoutService.createForCompletedOrder(saved, safeTotal);
-            if (safeTotal.compareTo(java.math.BigDecimal.ZERO) > 0) {
-                platformWalletService.credit(
-                        safeTotal,
-                        "COMMISSION",
-                        saved.getId(),
-                        saved.getSellerId(),
-                        "Auto credit on order " + saved.getOrderCode());
-            }
-        } catch (Exception ex) {
-            log.warn("Failed to create payout or credit wallet on buyer completion for order {}: {}",
-                    saved.getId(), ex.getMessage());
         }
 
         return toDetailDto(saved, orderItemRepository.findByOrderId(orderId));
@@ -670,6 +696,11 @@ public class OrderServiceImpl implements OrderService {
 
     private OrderDetailDto toDetailDto(Order order, List<OrderItem> items, String paymentUrl) {
         OrderDetailDto dto = OrderDetailDto.from(order, items, paymentUrl);
+        if (order.getSellerId() != null) {
+            try {
+                sellerRepository.findById(order.getSellerId()).ifPresent(s -> dto.setShopName(s.getShopName()));
+            } catch (Exception ignored) {}
+        }
         if (dto.getItems() != null) {
             for (OrderItemDto item : dto.getItems()) {
                 if ((item.getImageUrl() == null || item.getImageUrl().isBlank()) && item.getVariantId() != null) {
@@ -766,6 +797,37 @@ public class OrderServiceImpl implements OrderService {
         }
         String ip = (clientIp != null && !clientIp.isBlank()) ? clientIp : "127.0.0.1";
         return vnpayService.createPaymentUrl(order, ip);
+    }
+
+    @Override
+    @Transactional
+    public List<com.example.B2C.modules.cart.dto.CartItemDto> reorderForBuyer(Long userId, Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Đơn hàng", "id: " + orderId));
+        if (!userId.equals(order.getBuyerId())) {
+            throw new ForbiddenException("Bạn không có quyền truy cập đơn hàng này");
+        }
+
+        List<OrderItem> orderItems = orderItemRepository.findByOrderId(orderId);
+        if (orderItems == null || orderItems.isEmpty()) {
+            throw new BadRequestException("Đơn hàng không có sản phẩm nào để mua lại.");
+        }
+
+        List<Map.Entry<com.example.B2C.modules.catalog.api.dto.ProductVariantView, Integer>> validatedSpecs =
+                new java.util.ArrayList<>();
+
+        for (OrderItem item : orderItems) {
+            int qty = (item.getQuantity() != null && item.getQuantity() > 0) ? item.getQuantity() : 1;
+            com.example.B2C.modules.catalog.api.dto.ProductVariantView variantView =
+                    catalogFacade.validateVariantForPurchase(
+                            item.getVariantId(),
+                            item.getProductName(),
+                            item.getVariantName(),
+                            qty);
+            validatedSpecs.add(Map.entry(variantView, qty));
+        }
+
+        return cartService.prepareReorderItems(userId, validatedSpecs);
     }
 
     // ── P2.1: Preview order (in-memory, no DB write) ────────────────────────────

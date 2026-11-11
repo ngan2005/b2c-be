@@ -169,13 +169,17 @@ public class InventoryService implements InventoryPort {
     }
 
     @Override
-    @Transactional
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public void confirm(Long variantId, int qty) {
-        if (qty <= 0) {
+        if (variantId == null || qty <= 0) {
             return;
         }
         ProductVariant v = repository.findByIdForUpdate(variantId)
-                .orElseThrow(() -> new ResourceNotFoundException("Variant", "id: " + variantId));
+                .orElse(null);
+        if (v == null) {
+            log.warn("Variant {} not found when confirming stock", variantId);
+            return;
+        }
         int reserved = v.getReservedQuantity() == null ? 0 : v.getReservedQuantity();
         int toConfirm = Math.min(qty, reserved);
         v.setReservedQuantity(reserved - toConfirm);

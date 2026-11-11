@@ -105,6 +105,15 @@ public class BuyerOrderController {
         return ResponseEntity.ok(ApiResponse.success(java.util.Map.of("paymentUrl", paymentUrl)));
     }
 
+    @PostMapping("/{id}/reorder")
+    @Operation(summary = "Mua lại đơn hàng — Kiểm tra sản phẩm còn bán/còn hàng và trả về danh sách sản phẩm để tạo đơn mới")
+    public ResponseEntity<ApiResponse<java.util.List<com.example.B2C.modules.cart.dto.CartItemDto>>> reorder(
+            @PathVariable Long id) {
+        Long userId = currentUserProvider.getCurrentUserId();
+        java.util.List<com.example.B2C.modules.cart.dto.CartItemDto> items = orderService.reorderForBuyer(userId, id);
+        return ResponseEntity.ok(ApiResponse.success("Đã lấy danh sách sản phẩm mua lại", items));
+    }
+
     @PatchMapping("/{id}/cancel")
     @Operation(summary = "Cancel my order (only allowed for PENDING or CONFIRMED orders)")
     public ResponseEntity<ApiResponse<OrderDetailDto>> cancel(

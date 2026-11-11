@@ -51,7 +51,8 @@ public class CartService {
         if (req.getQuantity() <= 0) {
             throw new BadRequestException("Quantity must be > 0");
         }
-        ProductVariantView variant = catalogFacade.getVariant(req.getVariantId());
+        ProductVariantView variant = catalogFacade.validateVariantForPurchase(
+                req.getVariantId(), null, null, req.getQuantity());
         Cart cart = getOrCreateCart(userId);
         ProductVariant variantProxy = entityManager.getReference(ProductVariant.class, req.getVariantId());
         CartItem item = cartItemRepository.findByCartIdAndVariantId(cart.getId(), req.getVariantId())
@@ -80,6 +81,53 @@ public class CartService {
         }
         CartItem saved = cartItemRepository.save(item);
         return toDto(saved);
+    }
+
+    /**
+     * Prepares cart items for reordering an existing order:
+     * - Unselects all existing items in the user's cart so only the reordered items will be checked out.
+     * - Upserts each validated variant with the quantity from the original order and the current live price.
+     * - Returns the list of prepared {@link CartItemDto} items.
+     */
+    @Transactional
+    public List<CartItemDto> prepareReorderItems(
+            Long userId,
+            List<java.util.Map.Entry<ProductVariantView, Integer>> reorderSpecs) {
+        Cart cart = getOrCreateCart(userId);
+        List<CartItem> existingItems = cartItemRepository.findByCartId(cart.getId());
+        for (CartItem existing : existingItems) {
+            if (Boolean.TRUE.equals(existing.getIsSelected())) {
+                existing.setIsSelected(false);
+                cartItemRepository.save(existing);
+            }
+        }
+
+        List<CartItemDto> result = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<ProductVariantView, Integer> entry : reorderSpecs) {
+            ProductVariantView variant = entry.getKey();
+            int qty = Math.max(1, entry.getValue() != null ? entry.getValue() : 1);
+            ProductVariant variantProxy = entityManager.getReference(ProductVariant.class, variant.id());
+
+            CartItem item = cartItemRepository.findByCartIdAndVariantId(cart.getId(), variant.id())
+                    .orElseGet(() -> CartItem.builder()
+                            .cart(cart)
+                            .variant(variantProxy)
+                            .variantId(variant.id())
+                            .build());
+
+            item.setVariant(variantProxy);
+            item.setVariantId(variant.id());
+            item.setProductName(variant.productName());
+            item.setVariantName(variant.variantName());
+            item.setImageUrl(variant.imageUrl());
+            item.setPriceSnapshot(variant.unitPrice());
+            item.setQuantity(qty);
+            item.setIsSelected(true);
+
+            CartItem saved = cartItemRepository.save(item);
+            result.add(toDto(saved));
+        }
+        return result;
     }
 
     @Transactional

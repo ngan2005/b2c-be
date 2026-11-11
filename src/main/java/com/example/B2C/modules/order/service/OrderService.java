@@ -59,6 +59,13 @@ public interface OrderService {
     // P1.2 — Retry payment for buyer
     String retryPaymentForBuyer(Long userId, Long orderId, String clientIp);
 
+    /**
+     * Validates all products/variants from an existing order for reorder (Mua lại),
+     * prepares them as selected cart items for a brand-new order, and returns those items.
+     * Throws BadRequestException if any product does not exist, is discontinued/inactive, or out of stock.
+     */
+    java.util.List<com.example.B2C.modules.cart.dto.CartItemDto> reorderForBuyer(Long userId, Long orderId);
+
     // P2.1 — Preview order (no DB write)
     OrderPreviewResponse previewOrder(Long userId, PreviewOrderRequest request);
 

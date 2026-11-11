@@ -31,6 +31,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -177,7 +179,7 @@ public class ChatService {
             throw new BadRequestException("Either conversationId or sellerId must be provided");
         }
 
-        SenderType senderType = "SELLER".equalsIgnoreCase(role) ? SenderType.SELLER : SenderType.BUYER;
+        SenderType senderType = resolveIsBuyer(conv, userId, role) ? SenderType.BUYER : SenderType.SELLER;
 
         Message message = Message.builder()
                 .conversation(conv)
@@ -201,7 +203,7 @@ public class ChatService {
             message.setRefOrder(order);
         }
 
-        Message saved = messageRepository.save(message);
+        Message saved = messageRepository.saveAndFlush(message);
 
         // Update conversation metadata
         conv.setLastMessage(truncate(req.getContent(), 100));
@@ -214,10 +216,10 @@ public class ChatService {
             conv.setBuyerUnreadCount(conv.getBuyerUnreadCount() + 1);
         }
 
-        conversationRepository.save(conv);
+        conversationRepository.saveAndFlush(conv);
 
         MessageDto dto = MessageDto.from(saved);
-        broadcastNewMessage(conv, dto);
+        runAfterCommit(() -> broadcastNewMessage(conv, dto));
 
         log.info("Message {} sent by user {} in conversation {}", saved.getId(), userId, conv.getId());
         return dto;
@@ -233,7 +235,7 @@ public class ChatService {
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation", "id: " + conversationId));
         verifyParticipant(conv, userId, role);
 
-        boolean isBuyer = !"SELLER".equalsIgnoreCase(role);
+        boolean isBuyer = resolveIsBuyer(conv, userId, role);
         messageRepository.markAsRead(conversationId, userId, isBuyer, LocalDateTime.now());
 
         if (isBuyer) {
@@ -242,7 +244,8 @@ public class ChatService {
             conv.setSellerUnreadCount(0);
         }
         conversationRepository.saveAndFlush(conv);
-        broadcastConversationRead(conv, isBuyer ? "BUYER" : "SELLER");
+        String readerRole = isBuyer ? "BUYER" : "SELLER";
+        runAfterCommit(() -> broadcastConversationRead(conv, readerRole));
 
         // Fetch in ascending order for display
         Page<Message> messages = messageRepository.findByConversationIdOrderByCreatedAtAsc(
@@ -283,7 +286,7 @@ public class ChatService {
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation", "id: " + conversationId));
         verifyParticipant(conv, userId, role);
 
-        boolean isBuyer = !"SELLER".equalsIgnoreCase(role);
+        boolean isBuyer = resolveIsBuyer(conv, userId, role);
         messageRepository.markAsRead(conversationId, userId, isBuyer, LocalDateTime.now());
 
         if (isBuyer) {
@@ -292,7 +295,35 @@ public class ChatService {
             conv.setSellerUnreadCount(0);
         }
         conversationRepository.saveAndFlush(conv);
-        broadcastConversationRead(conv, isBuyer ? "BUYER" : "SELLER");
+        String readerRole = isBuyer ? "BUYER" : "SELLER";
+        runAfterCommit(() -> broadcastConversationRead(conv, readerRole));
+    }
+
+    private void runAfterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
+    }
+
+    private boolean resolveIsBuyer(Conversation conv, Long userId, String role) {
+        boolean isConvBuyer = conv.getBuyer() != null && userId.equals(conv.getBuyer().getId());
+        boolean isConvSeller = conv.getSeller() != null
+                && conv.getSeller().getUser() != null
+                && userId.equals(conv.getSeller().getUser().getId());
+        if (isConvBuyer && !isConvSeller) {
+            return true;
+        }
+        if (isConvSeller && !isConvBuyer) {
+            return false;
+        }
+        return !"SELLER".equalsIgnoreCase(role);
     }
 
     private void broadcastNewMessage(Conversation conv, MessageDto dto) {
@@ -353,15 +384,11 @@ public class ChatService {
     }
 
     private void verifyParticipant(Conversation conv, Long userId, String role) {
-        if ("SELLER".equalsIgnoreCase(role)) {
-            Seller seller = sellerRepository.findByUserId(userId).orElse(null);
-            if (seller == null || !seller.getId().equals(conv.getSeller().getId())) {
-                throw new ForbiddenException("You are not a participant in this conversation");
-            }
-        } else {
-            if (!userId.equals(conv.getBuyer().getId())) {
-                throw new ForbiddenException("You are not a participant in this conversation");
-            }
+        boolean isBuyerParticipant = conv.getBuyer() != null && userId.equals(conv.getBuyer().getId());
+        Seller seller = sellerRepository.findByUserId(userId).orElse(null);
+        boolean isSellerParticipant = seller != null && conv.getSeller() != null && seller.getId().equals(conv.getSeller().getId());
+        if (!isBuyerParticipant && !isSellerParticipant) {
+            throw new ForbiddenException("You are not a participant in this conversation");
         }
     }
 
