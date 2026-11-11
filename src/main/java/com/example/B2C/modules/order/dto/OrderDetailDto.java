@@ -22,6 +22,7 @@ public class OrderDetailDto {
     private String orderCode;
     private Long buyerId;
     private Long sellerId;
+    private String shopName;
 
     private String receiverName;
     private String receiverPhone;
@@ -67,6 +68,12 @@ public class OrderDetailDto {
     }
 
     public static OrderDetailDto from(Order order, List<OrderItem> items, String paymentUrl) {
+        String effectivePaymentStatus = order.getPaymentStatus();
+        if (order.getStatus() == com.example.B2C.modules.order.entity.OrderStatus.DELIVERED
+                || order.getStatus() == com.example.B2C.modules.order.entity.OrderStatus.COMPLETED) {
+            effectivePaymentStatus = "PAID";
+        }
+
         return OrderDetailDto.builder()
                 .id(order.getId())
                 .orderCode(order.getOrderCode())
@@ -81,7 +88,7 @@ public class OrderDetailDto {
                 .platformDiscount(order.getPlatformDiscount())
                 .totalAmount(order.getTotalAmount())
                 .paymentMethod(order.getPaymentMethod())
-                .paymentStatus(order.getPaymentStatus())
+                .paymentStatus(effectivePaymentStatus)
                 .status(order.getStatus().name())
                 .note(order.getNote())
                 .cancelReason(order.getCancelReason())

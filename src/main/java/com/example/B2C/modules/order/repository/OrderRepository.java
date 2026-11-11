@@ -3,15 +3,21 @@ package com.example.B2C.modules.order.repository;
 import com.example.B2C.common.repository.BaseRepository;
 import com.example.B2C.modules.order.entity.Order;
 import com.example.B2C.modules.order.entity.OrderStatus;
+import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
-public interface OrderRepository extends BaseRepository<Order, Long> {
+public interface OrderRepository extends BaseRepository<Order, Long>, JpaSpecificationExecutor<Order> {
 
     Optional<Order> findByOrderCode(String orderCode);
 
@@ -28,6 +34,49 @@ public interface OrderRepository extends BaseRepository<Order, Long> {
             @Param("buyerId") Long buyerId,
             @Param("status") OrderStatus status,
             org.springframework.data.domain.Pageable pageable);
+
+    default Page<Order> findByBuyerFiltered(
+            Long buyerId,
+            OrderStatus status,
+            String search,
+            String paymentMethod,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            BigDecimal minAmount,
+            BigDecimal maxAmount,
+            Pageable pageable) {
+        Specification<Order> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.equal(root.get("buyerId"), buyerId));
+
+            if (status != null) {
+                predicates.add(cb.equal(root.get("status"), status));
+            }
+            if (search != null && !search.isBlank()) {
+                String pattern = "%" + search.toLowerCase().trim() + "%";
+                predicates.add(cb.like(cb.lower(root.get("orderCode")), pattern));
+            }
+            if (paymentMethod != null && !paymentMethod.isBlank()) {
+                predicates.add(cb.equal(cb.upper(root.get("paymentMethod")), paymentMethod.toUpperCase().trim()));
+            }
+            if (fromDate != null) {
+                predicates.add(cb.greaterThanOrEqualTo(root.get("createdAt"), fromDate));
+            }
+            if (toDate != null) {
+                predicates.add(cb.lessThanOrEqualTo(root.get("createdAt"), toDate));
+            }
+            if (minAmount != null) {
+                predicates.add(cb.greaterThanOrEqualTo(root.get("totalAmount"), minAmount));
+            }
+            if (maxAmount != null) {
+                predicates.add(cb.lessThanOrEqualTo(root.get("totalAmount"), maxAmount));
+            }
+
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+
+        return findAll(spec, pageable);
+    }
 
     @Query("""
         SELECT o FROM Order o

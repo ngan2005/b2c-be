@@ -27,6 +27,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -189,6 +190,38 @@ class AuthServiceImplTest {
             assertThat(response.getRefreshToken()).isEqualTo("refresh-token");
             assertThat(response.getUserId()).isEqualTo(10L);
             assertThat(response.getRole()).isEqualTo("BUYER");
+        }
+
+        @Test
+        @DisplayName("Login with wrong password throws BadCredentialsException with Vietnamese password message")
+        void loginWithWrongPassword_throwsFriendlyMessage() {
+            LoginRequest loginRequest = new LoginRequest();
+            loginRequest.setEmail("user@test.com");
+            loginRequest.setPassword("wrong-password");
+
+            when(authenticationManager.authenticate(any()))
+                    .thenThrow(new BadCredentialsException("Bad credentials"));
+            when(userRepository.existsByEmail("user@test.com")).thenReturn(true);
+
+            assertThatThrownBy(() -> authService.login(loginRequest))
+                    .isInstanceOf(BadCredentialsException.class)
+                    .hasMessage("Mật khẩu không chính xác. Vui lòng kiểm tra lại");
+        }
+
+        @Test
+        @DisplayName("Login with non-existing email throws BadCredentialsException with Vietnamese email message")
+        void loginWithNonExistingEmail_throwsFriendlyMessage() {
+            LoginRequest loginRequest = new LoginRequest();
+            loginRequest.setEmail("nonexist@test.com");
+            loginRequest.setPassword("any-password");
+
+            when(authenticationManager.authenticate(any()))
+                    .thenThrow(new BadCredentialsException("Bad credentials"));
+            when(userRepository.existsByEmail("nonexist@test.com")).thenReturn(false);
+
+            assertThatThrownBy(() -> authService.login(loginRequest))
+                    .isInstanceOf(BadCredentialsException.class)
+                    .hasMessage("Email không tồn tại trong hệ thống");
         }
     }
 }

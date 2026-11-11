@@ -106,11 +106,11 @@ class ProductServiceImplTest {
                 .build();
 
         Page<Product> page = new PageImpl<>(List.of(sampleProduct), PageRequest.of(0, 20), 1);
-        when(productRepository.searchProductsFulltext(
-                eq(ProductStatus.ACTIVE.name()), eq(10L), eq(1L),
+        when(productRepository.searchProductsWithKeywordLike(
+                eq(ProductStatus.ACTIVE), eq(10L), eq(1L),
                 eq(new BigDecimal("10000000")), eq(new BigDecimal("50000000")),
                 isNull(), isNull(),
-                eq("iphone"), eq(6), any(Pageable.class))
+                eq("iphone"), any(Pageable.class))
         ).thenReturn(page);
 
         PageResponse<ProductSummaryDto> result = productService.searchProducts(request);
@@ -121,11 +121,11 @@ class ProductServiceImplTest {
         assertThat(dto.getSlug()).isEqualTo("iphone-15-pro");
         assertThat(dto.getShopName()).isEqualTo("Test Shop");
         assertThat(dto.getCategoryName()).isEqualTo("Electronics");
-        verify(productRepository).searchProductsFulltext(
-                eq(ProductStatus.ACTIVE.name()), eq(10L), eq(1L),
+        verify(productRepository).searchProductsWithKeywordLike(
+                eq(ProductStatus.ACTIVE), eq(10L), eq(1L),
                 eq(new BigDecimal("10000000")), eq(new BigDecimal("50000000")),
                 isNull(), isNull(),
-                eq("iphone"), eq(6), any(Pageable.class));
+                eq("iphone"), any(Pageable.class));
     }
 
     @Test

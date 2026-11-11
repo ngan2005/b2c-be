@@ -19,6 +19,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -155,15 +156,23 @@ public class PayoutService {
      * @param commissionAmount platform commission for this order (from workstream A)
      * @return the created payout, or null if idempotently skipped
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public SellerPayout createForCompletedOrder(Order order, BigDecimal commissionAmount) {
         if (payoutRepository.existsByOrderIdAndStatusNot(order.getId(), PayoutStatus.CANCELLED)) {
             log.debug("Payout already exists for order {}; skipping", order.getId());
             return null;
         }
 
-        Seller seller = sellerRepository.findById(order.getSellerId())
-                .orElseThrow(() -> new ResourceNotFoundException("Seller", "id: " + order.getSellerId()));
+        if (order.getSellerId() == null) {
+            log.warn("Order {} has no sellerId, skipping payout creation", order.getId());
+            return null;
+        }
+
+        Seller seller = sellerRepository.findById(order.getSellerId()).orElse(null);
+        if (seller == null) {
+            log.warn("Seller {} not found for order {}, skipping payout creation", order.getSellerId(), order.getId());
+            return null;
+        }
 
         BigDecimal gross = order.getTotalAmount();
         BigDecimal net   = gross.subtract(commissionAmount);

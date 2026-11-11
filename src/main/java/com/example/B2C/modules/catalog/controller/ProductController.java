@@ -24,7 +24,7 @@ public class ProductController {
 
         private final ProductService productService;
 
-        @GetMapping
+        @GetMapping({"", "/search"})
         @Operation(summary = "Search and list active products", description = "Supports filtering by category, seller, price range, keyword search. Sortable and paginated.")
         @ApiResponses({
                         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Products retrieved successfully"),

@@ -21,6 +21,20 @@ public interface OrderService {
 
     PageResponse<OrderSummaryDto> listOrdersForCurrentBuyer(Long userId, OrderStatus status, int page, int size);
 
+    PageResponse<OrderSummaryDto> listOrdersForCurrentBuyer(
+            Long userId,
+            OrderStatus status,
+            String search,
+            String paymentMethod,
+            java.time.LocalDateTime fromDate,
+            java.time.LocalDateTime toDate,
+            java.math.BigDecimal minAmount,
+            java.math.BigDecimal maxAmount,
+            String sortBy,
+            String sortDir,
+            int page,
+            int size);
+
     /**
      * Read-only list of orders where the user is the buyer_id.
      */
@@ -29,6 +43,8 @@ public interface OrderService {
     OrderDetailDto getOrderForBuyer(Long userId, Long orderId);
 
     OrderDetailDto cancelOrderForBuyer(Long userId, Long orderId, String reason);
+
+    OrderDetailDto completeOrderForBuyer(Long userId, Long orderId);
 
     OrderDetailDto requestReturn(Long userId, Long orderId, ReturnRequestDto request);
 
@@ -42,6 +58,13 @@ public interface OrderService {
 
     // P1.2 — Retry payment for buyer
     String retryPaymentForBuyer(Long userId, Long orderId, String clientIp);
+
+    /**
+     * Validates all products/variants from an existing order for reorder (Mua lại),
+     * prepares them as selected cart items for a brand-new order, and returns those items.
+     * Throws BadRequestException if any product does not exist, is discontinued/inactive, or out of stock.
+     */
+    java.util.List<com.example.B2C.modules.cart.dto.CartItemDto> reorderForBuyer(Long userId, Long orderId);
 
     // P2.1 — Preview order (no DB write)
     OrderPreviewResponse previewOrder(Long userId, PreviewOrderRequest request);

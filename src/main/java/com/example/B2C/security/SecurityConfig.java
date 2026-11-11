@@ -2,11 +2,13 @@ package com.example.B2C.security;
 
 import com.example.B2C.security.oauth2.CustomOAuth2UserService;
 import com.example.B2C.security.oauth2.OAuth2SuccessHandler;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -56,7 +58,22 @@ public class SecurityConfig {
         http
             .csrf(AbstractHttpConfigurer::disable)
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            .exceptionHandling(exceptions -> exceptions
+                .authenticationEntryPoint((request, response, authException) -> {
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                    response.setCharacterEncoding("UTF-8");
+                    response.getWriter().write("{\"code\":401,\"message\":\"Unauthorized: Full authentication is required to access this resource\"}");
+                })
+                .accessDeniedHandler((request, response, accessDeniedException) -> {
+                    response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                    response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                    response.setCharacterEncoding("UTF-8");
+                    response.getWriter().write("{\"code\":403,\"message\":\"Forbidden: Access is denied\"}");
+                })
+            )
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 // OAuth2 endpoints — Spring Security handles the redirect dance,
                 // the success handler then 302s the browser to the FE callback.
@@ -67,6 +84,7 @@ public class SecurityConfig {
                 ).permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/products/**", "/api/v1/categories/**", "/api/v1/promotions/**", "/api/v1/promotions", "/api/v1/public/**").permitAll()
                 .requestMatchers("/api/v1/public/**").permitAll()
+                .requestMatchers("/api/v1/upload", "/api/v1/upload/**").permitAll()
                 .requestMatchers("/api/v1/ai/**").permitAll()
                 .requestMatchers("/api/v1/__debug/**").permitAll()
                 // SockJS handshake + fallback transport endpoints (xhr-streaming,
@@ -77,7 +95,13 @@ public class SecurityConfig {
                 // custom headers, so authentication is checked manually inside
                 // the controller using the `?token=` query parameter.
                 .requestMatchers("/api/v1/admin/sse/**").permitAll()
-                .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                .requestMatchers(
+                        "/v3/api-docs/**",
+                        "/swagger-ui/**",
+                        "/swagger-ui.html",
+                        "/swagger-resources/**",
+                        "/webjars/**"
+                ).permitAll()
                 // ── BUYER-only routes (read-only carve-out below) ──
                 .requestMatchers(HttpMethod.POST, "/api/v1/buyer/orders").hasRole("BUYER")
                 .requestMatchers(HttpMethod.PATCH, "/api/v1/buyer/orders/**").hasRole("BUYER")
@@ -127,8 +151,9 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOriginPatterns(List.of("*"));
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"));
         config.setAllowedHeaders(List.of("*"));
+        config.setExposedHeaders(List.of("*"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 

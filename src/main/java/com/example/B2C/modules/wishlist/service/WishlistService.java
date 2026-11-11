@@ -63,6 +63,12 @@ public class WishlistService {
         return wishlistRepository.existsByUserAndProduct_Id(user, productId);
     }
 
+    @Transactional(readOnly = true)
+    public long count(String email) {
+        User user = getUser(email);
+        return wishlistRepository.countByUser(user);
+    }
+
     private User getUser(String email) {
         return userRepository.findByEmail(email)
             .orElseThrow(() -> new ResourceNotFoundException("User", email));

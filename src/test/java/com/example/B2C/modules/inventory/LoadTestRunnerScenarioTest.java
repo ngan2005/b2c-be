@@ -42,6 +42,7 @@ class LoadTestRunnerScenarioTest {
         // The unit test doesn't actually exercise the lock; we just want to
         // see what gets persisted.
         Mockito.doNothing().when(tx).executeWithoutResult(any());
+        Mockito.when(tx.execute(any())).thenReturn(48);
         org.springframework.jdbc.core.JdbcTemplate jdbc = Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
         E0NoLockStrategy e0 = Mockito.mock(E0NoLockStrategy.class);
         E1OptimisticStrategy e1 = Mockito.mock(E1OptimisticStrategy.class);

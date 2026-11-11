@@ -19,6 +19,10 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     Page<Message> findByConversationIdOrderByCreatedAtAsc(Long conversationId, Pageable pageable);
 
     @Modifying
+    @Query("UPDATE Message m SET m.isRead = true, m.readAt = :now WHERE m.conversation.id = :convId AND (m.sender.id <> :userId OR (:isBuyer = true AND m.senderType = com.example.B2C.modules.chat.entity.SenderType.SELLER) OR (:isBuyer = false AND m.senderType = com.example.B2C.modules.chat.entity.SenderType.BUYER)) AND m.isRead = false")
+    int markAsRead(@Param("convId") Long conversationId, @Param("userId") Long userId, @Param("isBuyer") boolean isBuyer, @Param("now") LocalDateTime now);
+
+    @Modifying
     @Query("UPDATE Message m SET m.isRead = true, m.readAt = :now WHERE m.conversation.id = :convId AND m.sender.id <> :userId AND m.isRead = false")
     int markAsRead(@Param("convId") Long conversationId, @Param("userId") Long userId, @Param("now") LocalDateTime now);
 }

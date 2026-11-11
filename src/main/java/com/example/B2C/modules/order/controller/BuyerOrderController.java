@@ -52,14 +52,23 @@ public class BuyerOrderController {
     }
 
     @GetMapping
-    @Operation(summary = "List my orders (filter by status, paginated)")
+    @Operation(summary = "List my orders (filter by status, date, amount, payment method, paginated)")
     public ResponseEntity<ApiResponse<PageResponse<OrderSummaryDto>>> list(
             @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String paymentMethod,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) java.time.LocalDateTime fromDate,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) java.time.LocalDateTime toDate,
+            @RequestParam(required = false) java.math.BigDecimal minAmount,
+            @RequestParam(required = false) java.math.BigDecimal maxAmount,
+            @RequestParam(required = false, defaultValue = "createdAt") String sortBy,
+            @RequestParam(required = false, defaultValue = "desc") String sortDir,
             @RequestParam(required = false, defaultValue = "0") int page,
             @RequestParam(required = false, defaultValue = "20") int size) {
         Long userId = currentUserProvider.getCurrentUserId();
         return ResponseEntity.ok(ApiResponse.success(
-                orderService.listOrdersForCurrentBuyer(userId, status, page, size)));
+                orderService.listOrdersForCurrentBuyer(
+                        userId, status, search, paymentMethod, fromDate, toDate, minAmount, maxAmount, sortBy, sortDir, page, size)));
     }
 
     /**
@@ -96,6 +105,15 @@ public class BuyerOrderController {
         return ResponseEntity.ok(ApiResponse.success(java.util.Map.of("paymentUrl", paymentUrl)));
     }
 
+    @PostMapping("/{id}/reorder")
+    @Operation(summary = "Mua lại đơn hàng — Kiểm tra sản phẩm còn bán/còn hàng và trả về danh sách sản phẩm để tạo đơn mới")
+    public ResponseEntity<ApiResponse<java.util.List<com.example.B2C.modules.cart.dto.CartItemDto>>> reorder(
+            @PathVariable Long id) {
+        Long userId = currentUserProvider.getCurrentUserId();
+        java.util.List<com.example.B2C.modules.cart.dto.CartItemDto> items = orderService.reorderForBuyer(userId, id);
+        return ResponseEntity.ok(ApiResponse.success("Đã lấy danh sách sản phẩm mua lại", items));
+    }
+
     @PatchMapping("/{id}/cancel")
     @Operation(summary = "Cancel my order (only allowed for PENDING or CONFIRMED orders)")
     public ResponseEntity<ApiResponse<OrderDetailDto>> cancel(
@@ -104,6 +122,14 @@ public class BuyerOrderController {
         Long userId = currentUserProvider.getCurrentUserId();
         return ResponseEntity.ok(ApiResponse.success("Order cancelled",
                 orderService.cancelOrderForBuyer(userId, id, reason)));
+    }
+
+    @PatchMapping("/{id}/complete")
+    @Operation(summary = "Confirm order received and complete the order")
+    public ResponseEntity<ApiResponse<OrderDetailDto>> complete(@PathVariable Long id) {
+        Long userId = currentUserProvider.getCurrentUserId();
+        return ResponseEntity.ok(ApiResponse.success("Order completed",
+                orderService.completeOrderForBuyer(userId, id)));
     }
 
     @PostMapping("/{id}/return-request")

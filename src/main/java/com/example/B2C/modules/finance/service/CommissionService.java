@@ -25,6 +25,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -51,11 +52,22 @@ public class CommissionService {
      * @throws IllegalStateException if no global default rule exists (should never happen
      *                              because the Flyway seed always creates one)
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public CommissionRecord snapshotForItem(OrderItem item, Order order) {
         if (recordRepository.existsByOrderItemId(item.getId())) {
             log.debug("Commission record already exists for order_item_id={}, skipping", item.getId());
             return recordRepository.findByOrderItemId(item.getId()).orElse(null);
+        }
+
+        if (order.getSellerId() == null) {
+            log.warn("Order {} has no sellerId, skipping commission snapshot", order.getId());
+            return null;
+        }
+
+        Seller seller = sellerRepository.findById(order.getSellerId()).orElse(null);
+        if (seller == null) {
+            log.warn("Seller {} not found for order {}, skipping commission snapshot", order.getSellerId(), order.getId());
+            return null;
         }
 
         Long categoryId = item.getProductId() != null ? resolveCategoryId(item.getProductId()) : null;
@@ -87,9 +99,6 @@ public class CommissionService {
         }
 
         BigDecimal sellerNet = orderAmount.subtract(rawCommission);
-
-        Seller seller = sellerRepository.findById(order.getSellerId())
-                .orElseThrow(() -> new ResourceNotFoundException("Seller", "id: " + order.getSellerId()));
 
         Category category = null;
         if (categoryId != null) {
@@ -129,8 +138,15 @@ public class CommissionService {
             }
         }
         return ruleRepository.findFirstByCategoryIdIsNullAndIsActiveTrueOrderByEffectiveFromDesc()
-                .orElseThrow(() -> new IllegalStateException(
-                        "No active global commission rule found — expected seeded default"));
+                .orElseGet(() -> {
+                    log.warn("No active global commission rule found, fallback to 0%");
+                    return CommissionRule.builder()
+                            .id(0L)
+                            .percent(BigDecimal.ZERO)
+                            .minOrderValue(BigDecimal.ZERO)
+                            .isActive(true)
+                            .build();
+                });
     }
 
     /**

@@ -36,6 +36,24 @@ public class ChatController {
         return sellerRepository.findByUserId(userId).isPresent() ? "SELLER" : "BUYER";
     }
 
+    @GetMapping("/conversations")
+    @Operation(
+            summary = "List conversations for current user",
+            description = "Auto-detects buyer or seller role and returns conversations sorted by newest message."
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Conversations retrieved"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Not authenticated")
+    })
+    public ResponseEntity<ApiResponse<PageResponse<ConversationDto>>> listConversations(
+            @Parameter(description = "Zero-based page index") @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size (max 50)") @RequestParam(defaultValue = "20") int size) {
+        Long userId = currentUserProvider.getCurrentUserId();
+        String role = detectRole(userId);
+        return ResponseEntity.ok(ApiResponse.success(
+                chatService.listConversations(userId, page, size, role)));
+    }
+
     @GetMapping("/buyer/conversations")
     @PreAuthorize("hasRole('BUYER')")
     @Operation(
@@ -126,7 +144,7 @@ public class ChatController {
                 chatService.listMessages(userId, detectRole(userId), id, page, size)));
     }
 
-    @PostMapping("/conversations/{id}/messages")
+    @PostMapping({"/conversations/{id}/messages", "/conversations/messages"})
     @Operation(
             summary = "Send a message in a conversation",
             description = "Sends a message as the authenticated buyer or seller. "
@@ -140,14 +158,28 @@ public class ChatController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Conversation or reference not found")
     })
     public ResponseEntity<ApiResponse<MessageDto>> sendMessage(
-            @Parameter(description = "Conversation ID") @PathVariable Long id,
+            @Parameter(description = "Conversation ID") @PathVariable(required = false) Long id,
             @Valid @RequestBody SendMessageRequest request) {
         Long userId = currentUserProvider.getCurrentUserId();
-        // Ensure conversationId is set for sendMessage
-        if (request.getConversationId() == null) {
-            request.setConversationId(id);
+        // Ensure conversationId is set for sendMessage if provided and valid
+        if (id != null && id > 0) {
+            if (request.getConversationId() == null) {
+                request.setConversationId(id);
+            }
+        } else {
+            if (request.getConversationId() != null && request.getConversationId() <= 0) {
+                request.setConversationId(null);
+            }
         }
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.created(
                 chatService.sendMessage(userId, detectRole(userId), request)));
+    }
+
+    @PostMapping("/conversations/{id}/read")
+    @Operation(summary = "Mark all messages in a conversation as read for current user")
+    public ResponseEntity<ApiResponse<Void>> markAsRead(@PathVariable Long id) {
+        Long userId = currentUserProvider.getCurrentUserId();
+        chatService.markConversationAsRead(userId, detectRole(userId), id);
+        return ResponseEntity.ok(ApiResponse.success(null));
     }
 }

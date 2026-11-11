@@ -56,10 +56,14 @@ public class PromoteAdminTool implements CommandLineRunner {
                     "bootstrap.admin.email is set but bootstrap.admin.password is missing");
         }
 
-        User target = userRepository.findByEmailWithRoles(adminEmail)
-                .orElseThrow(() -> new IllegalStateException(
-                        "bootstrap.admin.email=" + adminEmail + " does not match any existing user. "
-                                + "Register the account first, then re-run to promote it."));
+        var targetOpt = userRepository.findByEmailWithRoles(adminEmail);
+        if (targetOpt.isEmpty()) {
+            log.warn("bootstrap.admin.email={} does not match any existing user. "
+                    + "Register the account first, then re-run to promote it. Skipping admin bootstrap.", adminEmail);
+            return;
+        }
+
+        User target = targetOpt.get();
 
         if (target.hasRole(Role.CODE_ADMIN)) {
             log.info("User {} is already an ADMIN - nothing to promote.", adminEmail);

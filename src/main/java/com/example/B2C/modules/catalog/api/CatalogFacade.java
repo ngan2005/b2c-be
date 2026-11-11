@@ -36,4 +36,16 @@ public interface CatalogFacade {
 
     /** @return the weight in grams of the variant (or parent product), or fallback default. */
     Integer getWeightGram(Long variantId);
+
+    /**
+     * Validates that the variant and its parent product/seller still exist, are active (not discontinued,
+     * hidden, banned, deleted, or suspended), and have enough available stock for purchase/reorder.
+     *
+     * @throws com.example.B2C.common.exception.BadRequestException if the product/variant cannot be sold
+     */
+    ProductVariantView validateVariantForPurchase(
+            Long variantId,
+            String fallbackProductName,
+            String fallbackVariantName,
+            int requestedQuantity);
 }
