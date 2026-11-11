@@ -28,10 +28,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -56,6 +59,9 @@ public class ChatService {
     @Autowired
     @Lazy
     private ChatService self;
+
+    @Autowired(required = false)
+    private SimpMessagingTemplate messagingTemplate;
 
     /**
      * Get or create a conversation between a buyer and a seller.
@@ -210,8 +216,11 @@ public class ChatService {
 
         conversationRepository.save(conv);
 
+        MessageDto dto = MessageDto.from(saved);
+        broadcastNewMessage(conv, dto);
+
         log.info("Message {} sent by user {} in conversation {}", saved.getId(), userId, conv.getId());
-        return MessageDto.from(saved);
+        return dto;
     }
 
     /**
@@ -233,6 +242,7 @@ public class ChatService {
             conv.setSellerUnreadCount(0);
         }
         conversationRepository.saveAndFlush(conv);
+        broadcastConversationRead(conv, isBuyer ? "BUYER" : "SELLER");
 
         // Fetch in ascending order for display
         Page<Message> messages = messageRepository.findByConversationIdOrderByCreatedAtAsc(
@@ -282,6 +292,64 @@ public class ChatService {
             conv.setSellerUnreadCount(0);
         }
         conversationRepository.saveAndFlush(conv);
+        broadcastConversationRead(conv, isBuyer ? "BUYER" : "SELLER");
+    }
+
+    private void broadcastNewMessage(Conversation conv, MessageDto dto) {
+        if (messagingTemplate == null || conv == null) return;
+        try {
+            Map<String, Object> envelope = new HashMap<>();
+            envelope.put("type", "NEW_MESSAGE");
+            envelope.put("conversationId", conv.getId());
+            envelope.put("sellerId", conv.getSeller() != null ? conv.getSeller().getId() : null);
+            envelope.put("shopName", conv.getSeller() != null ? conv.getSeller().getShopName() : null);
+            envelope.put("shopAvatar", conv.getSeller() != null ? conv.getSeller().getLogoUrl() : null);
+            envelope.put("buyerUnreadCount", conv.getBuyerUnreadCount());
+            envelope.put("sellerUnreadCount", conv.getSellerUnreadCount());
+            envelope.put("message", dto);
+
+            Long buyerUserId = conv.getBuyer() != null ? conv.getBuyer().getId() : null;
+            Long sellerUserId = (conv.getSeller() != null && conv.getSeller().getUser() != null)
+                    ? conv.getSeller().getUser().getId()
+                    : null;
+
+            if (buyerUserId != null) {
+                messagingTemplate.convertAndSend("/topic/chat/user/" + buyerUserId, (Object) envelope);
+            }
+            if (sellerUserId != null && !sellerUserId.equals(buyerUserId)) {
+                messagingTemplate.convertAndSend("/topic/chat/user/" + sellerUserId, (Object) envelope);
+            }
+            messagingTemplate.convertAndSend("/topic/chat/conversation/" + conv.getId(), (Object) envelope);
+        } catch (Exception ex) {
+            log.warn("Failed to broadcast chat message for conversation {}: {}", conv.getId(), ex.getMessage());
+        }
+    }
+
+    private void broadcastConversationRead(Conversation conv, String readerRole) {
+        if (messagingTemplate == null || conv == null) return;
+        try {
+            Map<String, Object> envelope = new HashMap<>();
+            envelope.put("type", "CONVERSATION_READ");
+            envelope.put("conversationId", conv.getId());
+            envelope.put("readerRole", readerRole);
+            envelope.put("buyerUnreadCount", conv.getBuyerUnreadCount());
+            envelope.put("sellerUnreadCount", conv.getSellerUnreadCount());
+
+            Long buyerUserId = conv.getBuyer() != null ? conv.getBuyer().getId() : null;
+            Long sellerUserId = (conv.getSeller() != null && conv.getSeller().getUser() != null)
+                    ? conv.getSeller().getUser().getId()
+                    : null;
+
+            if (buyerUserId != null) {
+                messagingTemplate.convertAndSend("/topic/chat/user/" + buyerUserId, (Object) envelope);
+            }
+            if (sellerUserId != null && !sellerUserId.equals(buyerUserId)) {
+                messagingTemplate.convertAndSend("/topic/chat/user/" + sellerUserId, (Object) envelope);
+            }
+            messagingTemplate.convertAndSend("/topic/chat/conversation/" + conv.getId(), (Object) envelope);
+        } catch (Exception ex) {
+            log.warn("Failed to broadcast conversation read for {}: {}", conv.getId(), ex.getMessage());
+        }
     }
 
     private void verifyParticipant(Conversation conv, Long userId, String role) {

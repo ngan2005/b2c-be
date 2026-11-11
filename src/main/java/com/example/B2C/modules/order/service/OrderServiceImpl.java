@@ -168,12 +168,14 @@ public class OrderServiceImpl implements OrderService {
         if (newStatus == OrderStatus.CANCELLED) {
             releaseStockForOrder(orderId);
             eventPublisher.publishEvent(new OrderCancelledEvent(this, orderId, order.getBuyerId(), sellerId, note));
-        }
-        if (newStatus == OrderStatus.RETURNED) {
-            releaseStockForOrder(orderId);
-        }
-        if (newStatus == OrderStatus.SHIPPING) {
+        } else if (newStatus == OrderStatus.SHIPPING) {
             eventPublisher.publishEvent(new OrderShippedEvent(this, orderId, order.getBuyerId(), sellerId));
+        } else {
+            if (newStatus == OrderStatus.RETURNED) {
+                releaseStockForOrder(orderId);
+            }
+            eventPublisher.publishEvent(new com.example.B2C.realtime.OrderEventBroadcaster.OrderStatusChangedPayload(
+                    orderId, order.getBuyerId(), sellerId, newStatus.name()));
         }
 
         // ── Commission snapshot & Stock confirmation on COMPLETED ──
