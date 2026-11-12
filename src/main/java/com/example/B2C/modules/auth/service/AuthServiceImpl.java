@@ -1,6 +1,7 @@
 package com.example.B2C.modules.auth.service;
 
 import com.example.B2C.modules.auth.dto.AuthResponse;
+import com.example.B2C.modules.auth.dto.GoogleLoginRequest;
 import com.example.B2C.modules.auth.dto.LoginRequest;
 import com.example.B2C.modules.auth.dto.RefreshTokenRequest;
 import com.example.B2C.modules.auth.dto.RegisterRequest;
@@ -9,6 +10,9 @@ import com.example.B2C.common.exception.UnauthorizedException;
 import com.example.B2C.security.CustomUserDetails;
 import com.example.B2C.security.CustomUserDetailsService;
 import com.example.B2C.security.JwtTokenProvider;
+import com.example.B2C.security.oauth2.CustomOAuth2UserService;
+import com.example.B2C.security.oauth2.GoogleTokenVerifier;
+import com.example.B2C.modules.user.entity.AuthProvider;
 import com.example.B2C.modules.user.entity.Role;
 import com.example.B2C.modules.user.entity.RoleCode;
 import com.example.B2C.modules.user.entity.User;
@@ -18,9 +22,13 @@ import com.example.B2C.modules.user.repository.RoleRepository;
 import com.example.B2C.modules.user.repository.UserRepository;
 import com.example.B2C.modules.user.repository.UserRoleRepository;
 import com.example.B2C.modules.user.util.UserRoleResolver;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -38,6 +46,8 @@ public class AuthServiceImpl implements AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthenticationManager authenticationManager;
     private final CustomUserDetailsService userDetailsService;
+    private final GoogleTokenVerifier googleTokenVerifier;
+    private final CustomOAuth2UserService customOAuth2UserService;
 
     @Override
     @Transactional
@@ -61,25 +71,15 @@ public class AuthServiceImpl implements AuthService {
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .fullName(request.getFullName())
                 .status(UserStatus.ACTIVE)
+                .roles(new HashSet<>(Set.of(buyerRole)))
                 .build();
 
         User savedUser = userRepository.save(newUser);
 
-        // Persist the user_roles join row explicitly. The legacy code path in
-        // this method relied on the cascade declared on User.roles, but the
-        // @OneToMany + @JoinTable mapping does not reliably cascade a single
-        // managed Role into the join table when the user is created in the
-        // same transaction. We therefore write the join row directly to make
-        // the role available to security code that reads from user_roles.
-        userRoleRepository.save(UserRole.builder()
-                .userId(savedUser.getId())
-                .roleId(buyerRole.getId())
-                .build());
-        savedUser.getRoles().add(buyerRole);
-
         CustomUserDetails userDetails = new CustomUserDetails(savedUser);
 
-        String accessToken = jwtTokenProvider.generateToken(userDetails);
+        Map<String, Object> claims = Map.of("uid", savedUser.getId());
+        String accessToken = jwtTokenProvider.generateToken(claims, userDetails);
         String refreshToken = jwtTokenProvider.generateRefreshToken(userDetails);
 
         return AuthResponse.builder()
@@ -97,17 +97,28 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest request) {
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.getEmail(),
-                        request.getPassword()
-                )
-        );
+        Authentication authentication;
+        try {
+            authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(
+                            request.getEmail(),
+                            request.getPassword()
+                    )
+            );
+        } catch (BadCredentialsException ex) {
+            boolean emailExists = userRepository.existsByEmail(request.getEmail());
+            if (!emailExists) {
+                throw new BadCredentialsException("Email không tồn tại trong hệ thống");
+            } else {
+                throw new BadCredentialsException("Mật khẩu không chính xác. Vui lòng kiểm tra lại");
+            }
+        }
 
         CustomUserDetails userDetails = (CustomUserDetails) authentication.getPrincipal();
         User user = userDetails.getUser();
 
-        String accessToken = jwtTokenProvider.generateToken(userDetails);
+        Map<String, Object> claims = Map.of("uid", user.getId());
+        String accessToken = jwtTokenProvider.generateToken(claims, userDetails);
         String refreshToken = jwtTokenProvider.generateRefreshToken(userDetails);
 
         return AuthResponse.builder()
@@ -134,13 +145,44 @@ public class AuthServiceImpl implements AuthService {
             throw new UnauthorizedException("Invalid or expired Refresh Token");
         }
 
-        String newAccessToken = jwtTokenProvider.generateToken(userDetails);
-        String newRefreshToken = jwtTokenProvider.generateRefreshToken(userDetails);
         User user = userDetails.getUser();
+        Map<String, Object> claims = Map.of("uid", user.getId());
+        String newAccessToken = jwtTokenProvider.generateToken(claims, userDetails);
+        String newRefreshToken = jwtTokenProvider.generateRefreshToken(userDetails);
 
         return AuthResponse.builder()
                 .accessToken(newAccessToken)
                 .refreshToken(newRefreshToken)
+                .tokenType("Bearer")
+                .userId(user.getId())
+                .email(user.getEmail())
+                .fullName(user.getFullName())
+                .role(UserRoleResolver.getHighestRoleCode(user))
+                .roles(UserRoleResolver.getAllRoleCodes(user))
+                .build();
+    }
+
+    @Override
+    @Transactional
+    public AuthResponse loginWithGoogle(GoogleLoginRequest request) {
+        GoogleTokenVerifier.GoogleUserPayload payload = googleTokenVerifier.verify(request.getIdToken());
+
+        User user = customOAuth2UserService.resolveOrCreate(
+                AuthProvider.GOOGLE,
+                payload.providerUserId(),
+                payload.email(),
+                payload.fullName(),
+                payload.avatarUrl()
+        );
+
+        CustomUserDetails userDetails = new CustomUserDetails(user);
+        Map<String, Object> claims = Map.of("uid", user.getId());
+        String accessToken = jwtTokenProvider.generateToken(claims, userDetails);
+        String refreshToken = jwtTokenProvider.generateRefreshToken(userDetails);
+
+        return AuthResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
                 .tokenType("Bearer")
                 .userId(user.getId())
                 .email(user.getEmail())

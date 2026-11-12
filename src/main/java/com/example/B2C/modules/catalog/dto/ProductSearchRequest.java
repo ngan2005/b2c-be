@@ -22,4 +22,8 @@ public class ProductSearchRequest {
     private String sortDir;
     private Integer page;
     private Integer size;
+
+    // P2.4 — Mobile catalog filters
+    private String brand;
+    private BigDecimal minRating;
 }

@@ -78,6 +78,19 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
                 return param;
             }
         }
+        if (request.getURI() != null && request.getURI().getQuery() != null) {
+            String query = request.getURI().getQuery();
+            for (String param : query.split("&")) {
+                String[] pair = param.split("=");
+                if (pair.length == 2 && "token".equalsIgnoreCase(pair[0])) {
+                    try {
+                        return java.net.URLDecoder.decode(pair[1], java.nio.charset.StandardCharsets.UTF_8);
+                    } catch (Exception ignored) {
+                        return pair[1];
+                    }
+                }
+            }
+        }
         return null;
     }
 }

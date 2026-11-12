@@ -58,12 +58,21 @@ public class MessageDto {
     private LocalDateTime createdAt;
 
     public static MessageDto from(com.example.B2C.modules.chat.entity.Message msg) {
+        String displayName;
+        if (msg.getSenderType() == SenderType.SELLER) {
+            displayName = (msg.getConversation() != null && msg.getConversation().getSeller() != null)
+                    ? msg.getConversation().getSeller().getShopName()
+                    : (msg.getSender() != null ? msg.getSender().getFullName() : "Shop");
+        } else {
+            displayName = msg.getSender() != null ? msg.getSender().getFullName() : "Tôi";
+        }
+
         return MessageDto.builder()
                 .id(msg.getId())
                 .conversationId(msg.getConversation() != null ? msg.getConversation().getId() : null)
                 .senderId(msg.getSender() != null ? msg.getSender().getId() : null)
                 .senderType(msg.getSenderType())
-                .senderName(msg.getSender() != null ? msg.getSender().getFullName() : null)
+                .senderName(displayName)
                 .content(msg.getContent())
                 .messageType(msg.getMessageType())
                 .attachmentUrl(msg.getAttachmentUrl())

@@ -12,6 +12,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @SpringBootApplication
+@EnableScheduling
 public class B2CApplication {
 
 	/**

@@ -28,9 +28,13 @@ public class UserPresenceService {
     }
 
     public synchronized boolean removeSession(String sessionId) {
-        if (sessionId == null) return false;
+        return removeSessionAndCheckOffline(sessionId) != null;
+    }
+
+    public synchronized Long removeSessionAndCheckOffline(String sessionId) {
+        if (sessionId == null) return null;
         Long userId = sessionToUser.remove(sessionId);
-        if (userId == null) return false;
+        if (userId == null) return null;
 
         Set<String> sessions = userSessions.get(userId);
         if (sessions != null) {
@@ -38,10 +42,10 @@ public class UserPresenceService {
             if (sessions.isEmpty()) {
                 userSessions.remove(userId);
                 log.info("[PRESENCE] User {} now offline. Online total: {}", userId, userSessions.size());
-                return true;
+                return userId;
             }
         }
-        return false;
+        return null;
     }
 
     public boolean isUserOnline(Long userId) {

@@ -22,77 +22,85 @@ import java.math.BigDecimal;
 @Tag(name = "Products", description = "Public product browsing APIs (no authentication required)")
 public class ProductController {
 
-    private final ProductService productService;
+        private final ProductService productService;
 
-    @GetMapping
-    @Operation(
-            summary = "Search and list active products",
-            description = "Supports filtering by category, seller, price range, keyword search. Sortable and paginated."
-    )
-    @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Products retrieved successfully"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Invalid query parameters")
-    })
-    public ResponseEntity<ApiResponse<PageResponse<ProductSummaryDto>>> searchProducts(
-            @Parameter(description = "Category ID") @RequestParam(required = false) Long categoryId,
-            @Parameter(description = "Seller/Shop ID") @RequestParam(required = false) Long sellerId,
-            @Parameter(description = "Minimum price (inclusive)") @RequestParam(required = false) BigDecimal minPrice,
-            @Parameter(description = "Maximum price (inclusive)") @RequestParam(required = false) BigDecimal maxPrice,
-            @Parameter(description = "Search keyword in name/description/brand") @RequestParam(required = false) String q,
-            @Parameter(description = "Sort field: price | sold | rating | created | name") @RequestParam(required = false, defaultValue = "created") String sortBy,
-            @Parameter(description = "Sort direction: asc | desc") @RequestParam(required = false, defaultValue = "desc") String sortDir,
-            @Parameter(description = "Zero-based page index") @RequestParam(required = false, defaultValue = "0") int page,
-            @Parameter(description = "Page size (1-100, default 20)") @RequestParam(required = false, defaultValue = "20") int size
-    ) {
-        ProductSearchRequest request = ProductSearchRequest.builder()
-                .categoryId(categoryId)
-                .sellerId(sellerId)
-                .minPrice(minPrice)
-                .maxPrice(maxPrice)
-                .keyword(q)
-                .sortBy(sortBy)
-                .sortDir(sortDir)
-                .page(page)
-                .size(size)
-                .build();
+        @GetMapping({"", "/search"})
+        @Operation(summary = "Search and list active products", description = "Supports filtering by category, seller, price range, keyword search. Sortable and paginated.")
+        @ApiResponses({
+                        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Products retrieved successfully"),
+                        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Invalid query parameters")
+        })
+        public ResponseEntity<ApiResponse<PageResponse<ProductSummaryDto>>> searchProducts(
+                        @Parameter(description = "Category ID") @RequestParam(required = false) Long categoryId,
+                        @Parameter(description = "Seller/Shop ID") @RequestParam(required = false) Long sellerId,
+                        @Parameter(description = "Minimum price (inclusive)") @RequestParam(required = false) BigDecimal minPrice,
+                        @Parameter(description = "Maximum price (inclusive)") @RequestParam(required = false) BigDecimal maxPrice,
+                        @Parameter(description = "Search keyword in name/description/brand") @RequestParam(required = false) String q,
+                        @Parameter(description = "Brand name filter") @RequestParam(required = false) String brand,
+                        @Parameter(description = "Minimum rating average filter") @RequestParam(required = false) BigDecimal minRating,
+                        @Parameter(description = "Sort field: price | sold | rating | created | name") @RequestParam(required = false, defaultValue = "created") String sortBy,
+                        @Parameter(description = "Sort direction: asc | desc") @RequestParam(required = false, defaultValue = "desc") String sortDir,
+                        @Parameter(description = "Zero-based page index") @RequestParam(required = false, defaultValue = "0") int page,
+                        @Parameter(description = "Page size (1-100, default 20)") @RequestParam(required = false, defaultValue = "20") int size) {
+                ProductSearchRequest request = ProductSearchRequest.builder()
+                                .categoryId(categoryId)
+                                .sellerId(sellerId)
+                                .minPrice(minPrice)
+                                .maxPrice(maxPrice)
+                                .keyword(q)
+                                .brand(brand)
+                                .minRating(minRating)
+                                .sortBy(sortBy)
+                                .sortDir(sortDir)
+                                .page(page)
+                                .size(size)
+                                .build();
 
-        PageResponse<ProductSummaryDto> result = productService.searchProducts(request);
-        return ResponseEntity.ok(ApiResponse.success(result));
-    }
+                PageResponse<ProductSummaryDto> result = productService.searchProducts(request);
+                return ResponseEntity.ok(ApiResponse.success(result));
+        }
 
-    @GetMapping("/featured")
-    @Operation(summary = "List featured products", description = "Sorted by sold count descending")
-    public ResponseEntity<ApiResponse<PageResponse<ProductSummaryDto>>> getFeaturedProducts(
-            @RequestParam(required = false, defaultValue = "0") int page,
-            @RequestParam(required = false, defaultValue = "20") int size
-    ) {
-        PageResponse<ProductSummaryDto> result = productService.getFeaturedProducts(page, size);
-        return ResponseEntity.ok(ApiResponse.success(result));
-    }
+        @GetMapping("/featured")
+        @Operation(summary = "List featured products", description = "Sorted by sold count descending")
+        public ResponseEntity<ApiResponse<PageResponse<ProductSummaryDto>>> getFeaturedProducts(
+                        @RequestParam(required = false, defaultValue = "0") int page,
+                        @RequestParam(required = false, defaultValue = "20") int size) {
+                PageResponse<ProductSummaryDto> result = productService.getFeaturedProducts(page, size);
+                return ResponseEntity.ok(ApiResponse.success(result));
+        }
 
-    @GetMapping("/seller/{sellerId}")
-    @Operation(summary = "List all active products of a seller")
-    public ResponseEntity<ApiResponse<PageResponse<ProductSummaryDto>>> getProductsBySeller(
-            @PathVariable Long sellerId,
-            @RequestParam(required = false, defaultValue = "0") int page,
-            @RequestParam(required = false, defaultValue = "20") int size
-    ) {
-        PageResponse<ProductSummaryDto> result = productService.getProductsBySeller(sellerId, page, size);
-        return ResponseEntity.ok(ApiResponse.success(result));
-    }
+        @GetMapping("/seller/{sellerId}")
+        @Operation(summary = "List all active products of a seller")
+        public ResponseEntity<ApiResponse<PageResponse<ProductSummaryDto>>> getProductsBySeller(
+                        @PathVariable Long sellerId,
+                        @RequestParam(required = false, defaultValue = "0") int page,
+                        @RequestParam(required = false, defaultValue = "20") int size) {
+                PageResponse<ProductSummaryDto> result = productService.getProductsBySeller(sellerId, page, size);
+                return ResponseEntity.ok(ApiResponse.success(result));
+        }
 
-    @GetMapping("/{slug}")
-    @Operation(
-            summary = "Get product detail by slug",
-            description = "Returns full product info including variants, options, images, ratings"
-    )
-    @ApiResponses({
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Product found"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Product not found or hidden")
-    })
-    public ResponseEntity<ApiResponse<ProductDetailDto>> getProductDetail(@PathVariable String slug) {
-        ProductDetailDto product = productService.getProductDetail(slug);
-        productService.incrementViewCount(product.getId());
-        return ResponseEntity.ok(ApiResponse.success(product));
-    }
+        @GetMapping("/{slug}")
+        @Operation(summary = "Get product detail by slug", description = "Returns full product info including variants, options, images, ratings")
+        @ApiResponses({
+                        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Product found"),
+                        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Product not found or hidden")
+        })
+        public ResponseEntity<ApiResponse<ProductDetailDto>> getProductDetail(@PathVariable String slug) {
+                ProductDetailDto product = productService.getProductDetail(slug);
+                productService.incrementViewCount(product.getId());
+                return ResponseEntity.ok(ApiResponse.success(product));
+        }
+
+        // P1.1 — Lookup by numeric ID (for mobile)
+        @GetMapping("/id/{id}")
+        @Operation(summary = "Get product detail by numeric ID (mobile-friendly)")
+        @ApiResponses({
+                        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Product found"),
+                        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Product not found or hidden")
+        })
+        public ResponseEntity<ApiResponse<ProductDetailDto>> getProductDetailById(@PathVariable Long id) {
+                ProductDetailDto product = productService.getProductDetailById(id);
+                productService.incrementViewCount(product.getId());
+                return ResponseEntity.ok(ApiResponse.success(product));
+        }
 }

@@ -40,6 +40,7 @@ class ProductServiceImplTest {
     @Mock private ProductImageRepository productImageRepository;
     @Mock private ProductOptionRepository productOptionRepository;
     @Mock private ProductOptionValueRepository productOptionValueRepository;
+    @Mock private VariantOptionValueRepository variantOptionValueRepository;
     @Mock private CategoryRepository categoryRepository;
     @Mock private com.example.B2C.modules.seller.repository.SellerRepository sellerRepository;
     @Mock private com.example.B2C.realtime.UserPresenceService userPresenceService;
@@ -105,10 +106,11 @@ class ProductServiceImplTest {
                 .build();
 
         Page<Product> page = new PageImpl<>(List.of(sampleProduct), PageRequest.of(0, 20), 1);
-        when(productRepository.searchProductsFulltext(
-                eq(ProductStatus.ACTIVE.name()), eq(10L), eq(1L),
+        when(productRepository.searchProductsWithKeywordLike(
+                eq(ProductStatus.ACTIVE), eq(10L), eq(1L),
                 eq(new BigDecimal("10000000")), eq(new BigDecimal("50000000")),
-                eq("iphone"), eq(7), any(Pageable.class))
+                isNull(), isNull(),
+                eq("iphone"), any(Pageable.class))
         ).thenReturn(page);
 
         PageResponse<ProductSummaryDto> result = productService.searchProducts(request);
@@ -119,10 +121,34 @@ class ProductServiceImplTest {
         assertThat(dto.getSlug()).isEqualTo("iphone-15-pro");
         assertThat(dto.getShopName()).isEqualTo("Test Shop");
         assertThat(dto.getCategoryName()).isEqualTo("Electronics");
-        verify(productRepository).searchProductsFulltext(
-                eq(ProductStatus.ACTIVE.name()), eq(10L), eq(1L),
+        verify(productRepository).searchProductsWithKeywordLike(
+                eq(ProductStatus.ACTIVE), eq(10L), eq(1L),
                 eq(new BigDecimal("10000000")), eq(new BigDecimal("50000000")),
-                eq("iphone"), eq(7), any(Pageable.class));
+                isNull(), isNull(),
+                eq("iphone"), any(Pageable.class));
+    }
+
+    @Test
+    @DisplayName("searchProducts - FTS hits return results without falling back to LIKE")
+    void searchProducts_ftsHits_returnsResults() {
+        ProductSearchRequest request = ProductSearchRequest.builder()
+                .keyword("iphone")
+                .page(0)
+                .size(20)
+                .build();
+
+        Page<Product> ftsPage = new PageImpl<>(List.of(sampleProduct), PageRequest.of(0, 20), 1);
+        when(productRepository.searchProductsFulltext(
+                eq(ProductStatus.ACTIVE.name()), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(),
+                eq("iphone"), eq("iphone:*"), any(), any(), any(Pageable.class))
+        ).thenReturn(ftsPage);
+
+        PageResponse<ProductSummaryDto> result = productService.searchProducts(request);
+
+        assertThat(result.getContent()).hasSize(1);
+        assertThat(result.getContent().get(0).getSlug()).isEqualTo("iphone-15-pro");
+        verify(productRepository, never()).searchProductsWithKeywordLike(any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -144,7 +170,7 @@ class ProductServiceImplTest {
         ProductSearchRequest request = ProductSearchRequest.builder().build();
 
         Page<Product> emptyPage = new PageImpl<>(List.of(), PageRequest.of(0, 20), 0);
-        when(productRepository.searchProductsWithoutKeyword(any(), any(), any(), any(), any(), any()))
+        when(productRepository.searchProductsWithoutKeyword(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(emptyPage);
 
         PageResponse<ProductSummaryDto> result = productService.searchProducts(request);
@@ -161,12 +187,12 @@ class ProductServiceImplTest {
                 .build();
 
         Page<Product> emptyPage = new PageImpl<>(List.of(), PageRequest.of(0, 100), 0);
-        when(productRepository.searchProductsWithoutKeyword(any(), any(), any(), any(), any(), any()))
+        when(productRepository.searchProductsWithoutKeyword(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(emptyPage);
 
         productService.searchProducts(request);
 
-        verify(productRepository).searchProductsWithoutKeyword(any(), any(), any(), any(), any(),
+        verify(productRepository).searchProductsWithoutKeyword(any(), any(), any(), any(), any(), any(), any(),
                 argThat((Pageable p) -> p.getPageSize() == 100));
     }
 

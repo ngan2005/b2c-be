@@ -34,12 +34,12 @@ public class E1OptimisticStrategy implements InventoryStrategy {
     public void reserve(Long variantId, int qty, Long orderId) {
         ProductVariant v = repository.findById(variantId)
                 .orElseThrow(() -> new OutOfStockException("Variant " + variantId + " not found"));
-        if (v.getStockQuantity() < qty) {
+        int reserved = v.getReservedQuantity() == null ? 0 : v.getReservedQuantity();
+        int available = v.getStockQuantity() - reserved;
+        if (available < qty) {
             throw new OutOfStockException("Insufficient stock for variant " + variantId);
         }
-        v.setStockQuantity(v.getStockQuantity() - qty);
-        v.setReservedQuantity(
-                (v.getReservedQuantity() == null ? 0 : v.getReservedQuantity()) + qty);
+        v.setReservedQuantity(reserved + qty);
         v.setLastReservedAt(LocalDateTime.now());
         repository.saveAndFlush(v);
     }

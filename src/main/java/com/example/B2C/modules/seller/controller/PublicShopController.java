@@ -35,11 +35,39 @@ public class PublicShopController {
     private final ReviewService reviewService;
     private final UserPresenceService userPresenceService;
 
+    private Seller resolveSeller(String slugOrId) {
+        if (slugOrId == null || slugOrId.isBlank()) {
+            throw new ResourceNotFoundException("Shop identifier cannot be empty");
+        }
+
+        // 1. Try finding by slug
+        java.util.Optional<Seller> bySlug = sellerRepository.findBySlug(slugOrId);
+        if (bySlug.isPresent()) {
+            return bySlug.get();
+        }
+
+        // 2. Try finding by numeric ID
+        try {
+            Long id = Long.parseLong(slugOrId.trim());
+            java.util.Optional<Seller> byId = sellerRepository.findById(id);
+            if (byId.isPresent()) {
+                return byId.get();
+            }
+        } catch (NumberFormatException ignored) {}
+
+        // 3. Try finding by shopName
+        java.util.Optional<Seller> byShopName = sellerRepository.findFirstByShopNameIgnoreCase(slugOrId.trim());
+        if (byShopName.isPresent()) {
+            return byShopName.get();
+        }
+
+        throw new ResourceNotFoundException("Shop not found with identifier: " + slugOrId);
+    }
+
     @GetMapping("/{slug}")
-    @Operation(summary = "Get public shop profile by slug")
+    @Operation(summary = "Get public shop profile by slug or ID")
     public ResponseEntity<ApiResponse<PublicShopDto>> getShopBySlug(@PathVariable String slug) {
-        Seller seller = sellerRepository.findBySlug(slug)
-                .orElseThrow(() -> new ResourceNotFoundException("Shop not found with slug: " + slug));
+        Seller seller = resolveSeller(slug);
 
         long productCount = productRepository.countBySellerIdAndStatusAndDeletedAtIsNull(seller.getId(), ProductStatus.ACTIVE);
         boolean isOnline = seller.getUser() != null && userPresenceService.isUserOnline(seller.getUser().getId());
@@ -71,7 +99,7 @@ public class PublicShopController {
     }
 
     @GetMapping("/{slug}/products")
-    @Operation(summary = "Get products of shop by slug with filters and pagination")
+    @Operation(summary = "Get products of shop by slug or ID with filters and pagination")
     public ResponseEntity<ApiResponse<PageResponse<ProductSummaryDto>>> getShopProducts(
             @PathVariable String slug,
             @RequestParam(defaultValue = "0") int page,
@@ -79,8 +107,7 @@ public class PublicShopController {
             @RequestParam(required = false) String sort,
             @RequestParam(required = false) Long categoryId
     ) {
-        Seller seller = sellerRepository.findBySlug(slug)
-                .orElseThrow(() -> new ResourceNotFoundException("Shop not found with slug: " + slug));
+        Seller seller = resolveSeller(slug);
 
         String sortBy = "created";
         String sortDir = "desc";
@@ -106,14 +133,13 @@ public class PublicShopController {
     }
 
     @GetMapping("/{slug}/reviews")
-    @Operation(summary = "Get reviews of shop by slug")
+    @Operation(summary = "Get reviews of shop by slug or ID")
     public ResponseEntity<ApiResponse<PageResponse<ReviewDto>>> getShopReviews(
             @PathVariable String slug,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size
     ) {
-        Seller seller = sellerRepository.findBySlug(slug)
-                .orElseThrow(() -> new ResourceNotFoundException("Shop not found with slug: " + slug));
+        Seller seller = resolveSeller(slug);
 
         PageResponse<ReviewDto> result = reviewService.listBySellerId(seller.getId(), page, size);
         return ResponseEntity.ok(ApiResponse.success(result));

@@ -62,6 +62,13 @@ public class WishlistController {
             .build()));
     }
 
+    @GetMapping("/count")
+    @Operation(summary = "Get total count of products in the wishlist")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Long>>> count() {
+        String email = currentUserEmail();
+        return ResponseEntity.ok(ApiResponse.success(java.util.Map.of("count", wishlistService.count(email))));
+    }
+
     private String currentUserEmail() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated()) {

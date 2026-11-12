@@ -20,6 +20,8 @@ public interface SellerRepository extends BaseRepository<Seller, Long> {
 
     Optional<Seller> findBySlug(String slug);
 
+    Optional<Seller> findFirstByShopNameIgnoreCase(String shopName);
+
     long countByStatus(SellerStatus status);
 
     Page<Seller> findByStatus(SellerStatus status, Pageable pageable);

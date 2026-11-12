@@ -36,12 +36,12 @@ public class E2PessimisticStrategy implements InventoryStrategy {
     public void reserve(Long variantId, int qty, Long orderId) {
         ProductVariant locked = repository.findByIdForUpdate(variantId)
                 .orElseThrow(() -> new OutOfStockException("Variant " + variantId + " not found"));
-        if (locked.getStockQuantity() < qty) {
+        int reserved = locked.getReservedQuantity() == null ? 0 : locked.getReservedQuantity();
+        int available = locked.getStockQuantity() - reserved;
+        if (available < qty) {
             throw new OutOfStockException("Insufficient stock for variant " + variantId);
         }
-        locked.setStockQuantity(locked.getStockQuantity() - qty);
-        locked.setReservedQuantity(
-                (locked.getReservedQuantity() == null ? 0 : locked.getReservedQuantity()) + qty);
+        locked.setReservedQuantity(reserved + qty);
         locked.setLastReservedAt(LocalDateTime.now());
         repository.save(locked);
     }

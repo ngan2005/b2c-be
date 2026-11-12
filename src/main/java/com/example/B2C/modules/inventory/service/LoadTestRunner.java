@@ -3,6 +3,8 @@ package com.example.B2C.modules.inventory.service;
 import com.example.B2C.common.exception.OutOfStockException;
 import com.example.B2C.modules.catalog.entity.ProductVariant;
 import com.example.B2C.modules.catalog.repository.ProductVariantRepository;
+import com.example.B2C.modules.inventory.dto.AttemptDetailDto;
+import com.example.B2C.modules.inventory.dto.LoadTestExecutionResponse;
 import com.example.B2C.modules.inventory.entity.LoadTestResult;
 import com.example.B2C.modules.inventory.repository.LoadTestResultRepository;
 import com.example.B2C.modules.inventory.strategy.E0NoLockStrategy;
@@ -15,12 +17,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -107,20 +109,23 @@ public class LoadTestRunner {
      * commits. We need the final stock read to see those commits so that
      * {@code oversellCount} and {@code finalStock} reflect real DB state.
      */
-    public LoadTestResult runExperiment(String scenario, Long variantId, int concurrency, int perThread) {
+    public LoadTestExecutionResponse runExperiment(String scenario, Long variantId, int concurrency, int perThread) {
         String normalised = normaliseScenario(scenario);
         InventoryStrategy strategy = strategyFor(normalised);
 
         ProductVariant v = variantRepository.findById(variantId)
                 .orElseThrow(() -> new IllegalArgumentException("Variant " + variantId + " not found"));
-        int initialStock = v.getStockQuantity();
+        int initialStock = Math.max(0, v.getStockQuantity() - (v.getReservedQuantity() == null ? 0 : v.getReservedQuantity()));
         int totalAttempts = concurrency * perThread;
 
-        ExecutorService pool = Executors.newFixedThreadPool(concurrency);
-        CountDownLatch ready = new CountDownLatch(concurrency);
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(concurrency);
+        // Cap worker threads to 10 so we never exhaust HikariCP (pool size 30).
+        // This keeps 20 connections free for web requests, admin endpoints, and WebSockets.
+        int workerThreads = Math.min(Math.max(1, concurrency), 10);
+        ExecutorService pool = Executors.newFixedThreadPool(workerThreads);
+        CountDownLatch done = new CountDownLatch(totalAttempts);
         List<Long> latencies = Collections.synchronizedList(new ArrayList<>(totalAttempts));
+        List<AttemptDetailDto> attemptDetails = Collections.synchronizedList(new ArrayList<>(totalAttempts));
+        List<Integer> successfulIds = Collections.synchronizedList(new ArrayList<>());
         AtomicInteger success = new AtomicInteger(0);
         AtomicInteger failed = new AtomicInteger(0);
         AtomicInteger conflicts = new AtomicInteger(0);
@@ -128,66 +133,70 @@ public class LoadTestRunner {
 
         long startedAt = System.nanoTime();
         LocalDateTime startedWall = LocalDateTime.now();
-        for (int i = 0; i < concurrency; i++) {
-            final int threadIndex = i;
+
+        for (int i = 0; i < totalAttempts; i++) {
+            final int requestId = i + 1;
             pool.submit(() -> {
-                ready.countDown();
+                long t0 = System.nanoTime();
+                String status = "ERROR";
+                String msg = "";
+                boolean ok = false;
                 try {
-                    start.await();
-                    for (int j = 0; j < perThread; j++) {
-                        long t0 = System.nanoTime();
-                        try {
-                            // Each reservation gets its own transaction via
-                            // TransactionTemplate. This is critical: the worker
-                            // threads are NOT participating in the outer
-                            // @Transactional of runExperiment, so a self-call
-                            // would skip the proxy and never start a tx.
-                            final int idx = threadIndex * perThread + j;
-                            transactionTemplate.executeWithoutResult(status -> {
-                                strategy.reserve(variantId, 1, (long) idx);
-                            });
-                            success.incrementAndGet();
-                        } catch (OutOfStockException ex) {
-                            failed.incrementAndGet();
-                        } catch (OptimisticLockingFailureException ex) {
-                            failed.incrementAndGet();
-                            conflicts.incrementAndGet();
-                            errors.add(ex);
-                        } catch (Throwable ex) {
-                            failed.incrementAndGet();
-                            errors.add(ex);
-                        } finally {
-                            latencies.add((System.nanoTime() - t0) / 1_000_000L);
-                        }
-                    }
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
+                    // Each reservation gets its own transaction via TransactionTemplate.
+                    transactionTemplate.executeWithoutResult(s -> {
+                        strategy.reserve(variantId, 1, (long) (requestId - 1));
+                    });
+                    success.incrementAndGet();
+                    successfulIds.add(requestId);
+                    status = "SUCCESS";
+                    msg = "Giành mua thành công (Đã giữ chỗ thành công 1 sản phẩm)";
+                    ok = true;
+                } catch (OutOfStockException ex) {
+                    failed.incrementAndGet();
+                    status = "OUT_OF_STOCK";
+                    msg = "Từ chối vì kho đã hết hàng (Available Stock = 0)";
+                } catch (OptimisticLockingFailureException ex) {
+                    failed.incrementAndGet();
+                    conflicts.incrementAndGet();
+                    errors.add(ex);
+                    status = "CONFLICT";
+                    msg = "Xung đột phiên bản dữ liệu (Optimistic Lock Conflict)";
+                } catch (Throwable ex) {
+                    failed.incrementAndGet();
+                    errors.add(ex);
+                    status = "ERROR";
+                    msg = "Lỗi: " + (ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName());
                 } finally {
+                    long latency = (System.nanoTime() - t0) / 1_000_000L;
+                    latencies.add(latency);
+                    attemptDetails.add(AttemptDetailDto.builder()
+                            .attemptIndex(requestId)
+                            .status(status)
+                            .isSuccess(ok)
+                            .latencyMs(latency)
+                            .message(msg)
+                            .build());
                     done.countDown();
                 }
             });
         }
         try {
-            ready.await(30, TimeUnit.SECONDS);
-            start.countDown();
-            done.await(5, TimeUnit.MINUTES);
+            done.await(2, TimeUnit.MINUTES);
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         }
         pool.shutdownNow();
 
         long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
-        // Read final stock via a NATIVE query inside a fresh REQUIRES_NEW tx so
-        // we see all the worker-thread commits. Using JpaRepository#findById from
-        // a non-transactional context can return a stale value because the
-        // persistence context may cache the entity loaded at the top of the
-        // method (or be tied to the open-in-view session if any).
         int finalStock = transactionTemplate.execute(status -> jdbc.queryForObject(
-                "SELECT stock_quantity FROM product_variant WHERE id = ?",
+                "SELECT GREATEST(0, stock_quantity - COALESCE(reserved_quantity, 0)) FROM product_variant WHERE id = ?",
                 Integer.class, variantId));
         int oversell = Math.max(0, success.get() - initialStock);
 
         Collections.sort(latencies);
+        Collections.sort(successfulIds);
+        attemptDetails.sort(Comparator.comparingInt(AttemptDetailDto::getAttemptIndex));
+
         LoadTestResult result = LoadTestResult.builder()
                 .scenario(normalised)
                 .variantId(variantId)
@@ -213,7 +222,13 @@ public class LoadTestRunner {
         if (!errors.isEmpty() && errors.get(0) != null) {
             log.warn("Sample error during {}: {}", normalised, errors.get(0).getClass().getSimpleName());
         }
-        return resultRepository.save(result);
+        LoadTestResult savedResult = resultRepository.save(result);
+
+        return LoadTestExecutionResponse.builder()
+                .result(savedResult)
+                .successfulRequestIds(successfulIds)
+                .attempts(attemptDetails)
+                .build();
     }
 
     private static int percentile(List<Long> sorted, int p) {

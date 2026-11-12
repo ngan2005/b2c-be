@@ -61,6 +61,16 @@ public class OrderEventBroadcaster {
                         "reason", event.getReason() == null ? "" : event.getReason()));
     }
 
+    public record OrderStatusChangedPayload(Long orderId, Long buyerId, Long sellerId, String status) {}
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onOrderStatusChanged(OrderStatusChangedPayload event) {
+        broadcast(event.orderId(), event.buyerId(), event.sellerId(),
+                "ORDER_STATUS_UPDATED", Map.of(
+                        "orderId", event.orderId(),
+                        "status", event.status()));
+    }
+
     private void broadcast(Long orderId, Long buyerId, Long sellerId, String type, Map<String, Object> payload) {
         try {
             String buyerDest = "/topic/orders/" + buyerId;

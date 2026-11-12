@@ -20,16 +20,30 @@ public class UserPresenceEventListener {
 
     private final UserPresenceService userPresenceService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final com.example.B2C.modules.user.repository.UserRepository userRepository;
 
     @EventListener
     public void handleSessionConnected(SessionConnectedEvent event) {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
         Map<String, Object> attrs = accessor.getSessionAttributes();
-        if (attrs == null) return;
 
-        Object rawId = attrs.get("userId");
+        Object rawId = (attrs != null) ? attrs.get("userId") : null;
         String sessionId = accessor.getSessionId();
         Long userId = parseUserId(rawId);
+
+        // Fallback: Check accessor user or event user if userId not yet found in attrs
+        if (userId == null) {
+            java.security.Principal principal = accessor.getUser() != null ? accessor.getUser() : event.getUser();
+            if (principal != null && principal.getName() != null) {
+                String username = principal.getName();
+                userId = userRepository.findByEmail(username)
+                        .map(com.example.B2C.modules.user.entity.User::getId)
+                        .orElse(null);
+                if (userId != null && attrs != null) {
+                    attrs.put("userId", userId);
+                }
+            }
+        }
 
         if (userId != null && sessionId != null) {
             boolean wasOffline = userPresenceService.addSession(userId, sessionId);
@@ -43,13 +57,11 @@ public class UserPresenceEventListener {
     public void handleSessionDisconnect(SessionDisconnectEvent event) {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
         String sessionId = accessor.getSessionId();
-        Map<String, Object> attrs = accessor.getSessionAttributes();
-        Long userId = (attrs != null) ? parseUserId(attrs.get("userId")) : null;
 
         if (sessionId != null) {
-            boolean becameOffline = userPresenceService.removeSession(sessionId);
-            if (becameOffline && userId != null) {
-                broadcastPresence(userId, false);
+            Long offlineUserId = userPresenceService.removeSessionAndCheckOffline(sessionId);
+            if (offlineUserId != null) {
+                broadcastPresence(offlineUserId, false);
             }
         }
     }

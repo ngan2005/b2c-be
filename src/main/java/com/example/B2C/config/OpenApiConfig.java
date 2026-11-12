@@ -32,7 +32,9 @@ public class OpenApiConfig {
                                 .name("MIT")
                                 .url("https://opensource.org/licenses/MIT")))
                 .servers(List.of(
-                        new Server().url("http://localhost:8080").description("Local dev"),
+                        new Server().url("/").description("Default Server (Relative URL)"),
+                        new Server().url("http://localhost:8080").description("Local dev (localhost:8080)"),
+                        new Server().url("http://127.0.0.1:8080").description("Local dev (127.0.0.1:8080)"),
                         new Server().url("https://api.b2c.example.com").description("Production")))
                 .components(new Components()
                         .addSecuritySchemes(SECURITY_SCHEME_NAME,

@@ -51,10 +51,8 @@ public class CartService {
         if (req.getQuantity() <= 0) {
             throw new BadRequestException("Quantity must be > 0");
         }
-        ProductVariantView variant = catalogFacade.getVariant(req.getVariantId());
-        if (!inventoryPort.isAvailable(req.getVariantId(), req.getQuantity())) {
-            throw new BadRequestException("Requested quantity not available");
-        }
+        ProductVariantView variant = catalogFacade.validateVariantForPurchase(
+                req.getVariantId(), null, null, req.getQuantity());
         Cart cart = getOrCreateCart(userId);
         ProductVariant variantProxy = entityManager.getReference(ProductVariant.class, req.getVariantId());
         CartItem item = cartItemRepository.findByCartIdAndVariantId(cart.getId(), req.getVariantId())
@@ -69,7 +67,11 @@ public class CartService {
                         .quantity(0)
                         .isSelected(true)
                         .build());
-        item.setQuantity(item.getQuantity() + req.getQuantity());
+        int newQuantity = item.getQuantity() + req.getQuantity();
+        if (!inventoryPort.isAvailable(req.getVariantId(), newQuantity)) {
+            throw new BadRequestException("Requested quantity not available");
+        }
+        item.setQuantity(newQuantity);
         item.setPriceSnapshot(variant.unitPrice());
         if (item.getVariant() == null) {
             item.setVariant(variantProxy);
@@ -81,6 +83,53 @@ public class CartService {
         return toDto(saved);
     }
 
+    /**
+     * Prepares cart items for reordering an existing order:
+     * - Unselects all existing items in the user's cart so only the reordered items will be checked out.
+     * - Upserts each validated variant with the quantity from the original order and the current live price.
+     * - Returns the list of prepared {@link CartItemDto} items.
+     */
+    @Transactional
+    public List<CartItemDto> prepareReorderItems(
+            Long userId,
+            List<java.util.Map.Entry<ProductVariantView, Integer>> reorderSpecs) {
+        Cart cart = getOrCreateCart(userId);
+        List<CartItem> existingItems = cartItemRepository.findByCartId(cart.getId());
+        for (CartItem existing : existingItems) {
+            if (Boolean.TRUE.equals(existing.getIsSelected())) {
+                existing.setIsSelected(false);
+                cartItemRepository.save(existing);
+            }
+        }
+
+        List<CartItemDto> result = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<ProductVariantView, Integer> entry : reorderSpecs) {
+            ProductVariantView variant = entry.getKey();
+            int qty = Math.max(1, entry.getValue() != null ? entry.getValue() : 1);
+            ProductVariant variantProxy = entityManager.getReference(ProductVariant.class, variant.id());
+
+            CartItem item = cartItemRepository.findByCartIdAndVariantId(cart.getId(), variant.id())
+                    .orElseGet(() -> CartItem.builder()
+                            .cart(cart)
+                            .variant(variantProxy)
+                            .variantId(variant.id())
+                            .build());
+
+            item.setVariant(variantProxy);
+            item.setVariantId(variant.id());
+            item.setProductName(variant.productName());
+            item.setVariantName(variant.variantName());
+            item.setImageUrl(variant.imageUrl());
+            item.setPriceSnapshot(variant.unitPrice());
+            item.setQuantity(qty);
+            item.setIsSelected(true);
+
+            CartItem saved = cartItemRepository.save(item);
+            result.add(toDto(saved));
+        }
+        return result;
+    }
+
     @Transactional
     public CartItemDto updateItem(Long userId, Long itemId, UpdateCartItemRequest req) {
         Cart cart = getOrCreateCart(userId);
@@ -88,7 +137,7 @@ public class CartService {
                 .orElseThrow(() -> new ResourceNotFoundException("CartItem", "id: " + itemId));
         Long varId = item.getVariantId();
         if (req.getQuantity() != null && req.getQuantity() > 0) {
-            if (!inventoryPort.isAvailable(varId, req.getQuantity())) {
+            if (!req.getQuantity().equals(item.getQuantity()) && !inventoryPort.isAvailable(varId, req.getQuantity())) {
                 throw new BadRequestException("Requested quantity not available");
             }
             item.setQuantity(req.getQuantity());
@@ -130,12 +179,27 @@ public class CartService {
         });
     }
 
+    @Transactional
+    public void removeItems(Long userId, List<Long> itemIds) {
+        Cart cart = getOrCreateCart(userId);
+        List<CartItem> items = cartItemRepository.findByCartId(cart.getId()).stream()
+                .filter(ci -> itemIds.contains(ci.getId()))
+                .toList();
+        cartItemRepository.deleteAll(items);
+    }
+
+    public long countItems(Long userId) {
+        Cart cart = getOrCreateCart(userId);
+        return cartItemRepository.countByCartId(cart.getId());
+    }
+
     private static CartItemDto toDto(CartItem item) {
         BigDecimal unit = item.getPriceSnapshot();
         BigDecimal line = unit == null ? BigDecimal.ZERO
                 : unit.multiply(BigDecimal.valueOf(item.getQuantity()));
         Long varId = item.getVariantId();
-        return CartItemDto.builder()
+
+        CartItemDto.CartItemDtoBuilder builder = CartItemDto.builder()
                 .id(item.getId())
                 .variantId(varId)
                 .variantName(item.getVariantName())
@@ -145,7 +209,32 @@ public class CartService {
                 .priceSnapshot(unit)
                 .lineTotal(line)
                 .isSelected(item.getIsSelected())
-                .addedAt(item.getAddedAt())
-                .build();
+                .addedAt(item.getAddedAt());
+
+        // Populate mobile-required fields by traversing variant → product → seller
+        try {
+            com.example.B2C.modules.catalog.entity.ProductVariant v = item.getVariant();
+            if (v != null) {
+                builder.stockQuantity(v.getStockQuantity());
+                boolean active = Boolean.TRUE.equals(v.getIsActive())
+                        && v.getStockQuantity() != null
+                        && v.getStockQuantity() > 0;
+                builder.isAvailable(active);
+                com.example.B2C.modules.catalog.entity.Product p = v.getProduct();
+                if (p != null) {
+                    builder.productId(p.getId());
+                    builder.productSlug(p.getSlug());
+                    com.example.B2C.modules.seller.entity.Seller s = p.getSeller();
+                    if (s != null) {
+                        builder.sellerId(s.getId());
+                        builder.shopName(s.getShopName());
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // Lazy-load not available in certain call paths — mobile fields will be null
+        }
+
+        return builder.build();
     }
 }

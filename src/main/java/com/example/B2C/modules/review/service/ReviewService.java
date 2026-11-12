@@ -101,16 +101,25 @@ public class ReviewService {
     }
 
     /**
-     * List visible reviews for a product (public).
+     * List visible reviews for a product (public), optionally filtered by rating.
      */
-    public PageResponse<ReviewDto> listByProduct(Long productId, int page, int size) {
-        Page<Review> reviews = reviewRepository.findByProductIdAndStatus(
-                productId, ReviewStatus.VISIBLE, PageRequest.of(page, Math.min(size, 100)));
+    public PageResponse<ReviewDto> listByProduct(Long productId, Integer rating, int page, int size) {
+        Page<Review> reviews = reviewRepository.findByProductIdAndStatusWithOptionalRating(
+                productId, ReviewStatus.VISIBLE, rating,
+                PageRequest.of(page, Math.min(size, 100), org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt")));
         return PageResponse.of(reviews.map(r -> {
             String reviewerName = Boolean.TRUE.equals(r.getIsAnonymous())
-                    ? "Anonymous" : r.getUser().getFullName();
-            return ReviewDto.from(r, reviewerName, r.getUser().getAvatarUrl());
+                    ? "Khách hàng ẩn danh"
+                    : (r.getUser() != null && r.getUser().getFullName() != null && !r.getUser().getFullName().isBlank()
+                            ? r.getUser().getFullName()
+                            : "Khách hàng");
+            String avatarUrl = (r.getUser() != null) ? r.getUser().getAvatarUrl() : null;
+            return ReviewDto.from(r, reviewerName, avatarUrl);
         }));
+    }
+
+    public PageResponse<ReviewDto> listByProduct(Long productId, int page, int size) {
+        return listByProduct(productId, null, page, size);
     }
 
     /**
@@ -158,16 +167,95 @@ public class ReviewService {
         return ReviewDto.from(saved, reviewerName, saved.getUser().getAvatarUrl());
     }
 
+    /**
+     * Admin: List all reviews with filters (status, rating, keyword).
+     */
+    public PageResponse<ReviewDto> listForAdmin(ReviewStatus status, Integer rating, String keyword, int page, int size) {
+        PageRequest pageRequest = PageRequest.of(page, Math.min(size, 100), org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt"));
+        Page<Review> reviews;
+        if (keyword != null && !keyword.trim().isEmpty()) {
+            String pattern = "%" + keyword.trim().toLowerCase() + "%";
+            reviews = reviewRepository.findForAdminWithKeyword(status, rating, pattern, pageRequest);
+        } else {
+            reviews = reviewRepository.findForAdminWithoutKeyword(status, rating, pageRequest);
+        }
+        return PageResponse.of(reviews.map(r -> {
+            String reviewerName = (r.getUser() != null) ? r.getUser().getFullName() : "Người dùng";
+            if (Boolean.TRUE.equals(r.getIsAnonymous())) {
+                reviewerName += " (Ẩn danh)";
+            }
+            String avatarUrl = (r.getUser() != null) ? r.getUser().getAvatarUrl() : null;
+            return ReviewDto.from(r, reviewerName, avatarUrl);
+        }));
+    }
+
+    /**
+     * Admin: Change review status (e.g. VISIBLE <-> HIDDEN).
+     */
+    @Transactional
+    public ReviewDto updateStatusByAdmin(Long reviewId, ReviewStatus newStatus) {
+        Review review = reviewRepository.findById(reviewId)
+                .orElseThrow(() -> new ResourceNotFoundException("Review", "id: " + reviewId));
+        review.setStatus(newStatus);
+        Review saved = reviewRepository.save(review);
+        if (saved.getProduct() != null) {
+            updateProductRating(saved.getProduct().getId());
+        }
+        String reviewerName = (saved.getUser() != null) ? saved.getUser().getFullName() : "Người dùng";
+        if (Boolean.TRUE.equals(saved.getIsAnonymous())) {
+            reviewerName += " (Ẩn danh)";
+        }
+        String avatarUrl = (saved.getUser() != null) ? saved.getUser().getAvatarUrl() : null;
+        log.info("Admin updated review {} status to {}", reviewId, newStatus);
+        return ReviewDto.from(saved, reviewerName, avatarUrl);
+    }
+
+    /**
+     * Admin: Delete a review.
+     */
+    @Transactional
+    public void deleteByAdmin(Long reviewId) {
+        Review review = reviewRepository.findById(reviewId)
+                .orElseThrow(() -> new ResourceNotFoundException("Review", "id: " + reviewId));
+        Long productId = (review.getProduct() != null) ? review.getProduct().getId() : null;
+        reviewRepository.delete(review);
+        if (productId != null) {
+            updateProductRating(productId);
+        }
+        log.info("Admin deleted review {}", reviewId);
+    }
+
+    /**
+     * Admin: Get review metrics & statistics across platform.
+     */
+    public com.example.B2C.modules.review.dto.AdminReviewStatsDto getAdminStats() {
+        long total = reviewRepository.count();
+        long visible = reviewRepository.countByStatus(ReviewStatus.VISIBLE);
+        long hidden = reviewRepository.countByStatus(ReviewStatus.HIDDEN);
+        Double avgRating = reviewRepository.averagePlatformRating();
+        double avg = (avgRating != null) ? Math.round(avgRating * 10.0) / 10.0 : 0.0;
+
+        return com.example.B2C.modules.review.dto.AdminReviewStatsDto.builder()
+                .totalReviews(total)
+                .visibleCount(visible)
+                .hiddenCount(hidden)
+                .averageRating(avg)
+                .fiveStarCount(reviewRepository.countByRating(5))
+                .fourStarCount(reviewRepository.countByRating(4))
+                .threeStarCount(reviewRepository.countByRating(3))
+                .twoStarCount(reviewRepository.countByRating(2))
+                .oneStarCount(reviewRepository.countByRating(1))
+                .build();
+    }
+
     private void updateProductRating(Long productId) {
         Double avg = reviewRepository.averageRatingByProductId(productId);
-        if (avg != null) {
-            productRepository.findByIdAndDeletedAtIsNull(productId).ifPresent(p -> {
-                p.setRatingAvg(java.math.BigDecimal.valueOf(avg));
-                p.setRatingCount((int) reviewRepository.findByProductIdAndStatus(
-                        productId, ReviewStatus.VISIBLE, PageRequest.of(0, 1)).getTotalElements());
-                productRepository.save(p);
-            });
-        }
+        productRepository.findByIdAndDeletedAtIsNull(productId).ifPresent(p -> {
+            p.setRatingAvg(avg != null ? java.math.BigDecimal.valueOf(avg) : java.math.BigDecimal.ZERO);
+            p.setRatingCount((int) reviewRepository.findByProductIdAndStatus(
+                    productId, ReviewStatus.VISIBLE, PageRequest.of(0, 1)).getTotalElements());
+            productRepository.save(p);
+        });
     }
 
     private Seller getActiveSeller(Long userId) {

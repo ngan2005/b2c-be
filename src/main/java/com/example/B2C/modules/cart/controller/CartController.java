@@ -3,6 +3,7 @@ package com.example.B2C.modules.cart.controller;
 import com.example.B2C.common.response.ApiResponse;
 import com.example.B2C.common.security.CurrentUserProvider;
 import com.example.B2C.modules.cart.dto.AddCartItemRequest;
+import com.example.B2C.modules.cart.dto.BulkDeleteCartItemRequest;
 import com.example.B2C.modules.cart.dto.CartItemDto;
 import com.example.B2C.modules.cart.dto.UpdateCartItemRequest;
 import com.example.B2C.modules.cart.service.CartService;
@@ -78,5 +79,22 @@ public class CartController {
         Long userId = currentUserProvider.getCurrentUserId();
         cartService.removeItem(userId, id);
         return ResponseEntity.ok(ApiResponse.success("Item removed", null));
+    }
+
+    @DeleteMapping("/items")
+    @Operation(summary = "Bulk remove cart items (P2.3)",
+               description = "Remove multiple cart items in one request. Items not belonging to the current user's cart are silently ignored.")
+    public ResponseEntity<ApiResponse<Void>> removeItems(@Valid @RequestBody BulkDeleteCartItemRequest request) {
+        Long userId = currentUserProvider.getCurrentUserId();
+        cartService.removeItems(userId, request.getCartItemIds());
+        return ResponseEntity.ok(ApiResponse.success("Items removed", null));
+    }
+
+    @GetMapping("/count")
+    @Operation(summary = "Get total number of items in cart (P2.6)")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Long>>> countItems() {
+        Long userId = currentUserProvider.getCurrentUserId();
+        long count = cartService.countItems(userId);
+        return ResponseEntity.ok(ApiResponse.success(java.util.Map.of("count", count)));
     }
 }

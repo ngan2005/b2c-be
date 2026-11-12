@@ -18,6 +18,17 @@ public interface SellerPayoutRepository extends JpaRepository<SellerPayout, Long
 
     List<SellerPayout> findBySellerIdAndStatus(Long sellerId, PayoutStatus status);
 
+    @Query("""
+        SELECT p FROM SellerPayout p
+        WHERE p.seller.id = :sellerId
+          AND (:status IS NULL OR p.status = :status)
+        ORDER BY p.createdAt DESC
+        """)
+    Page<SellerPayout> findBySellerIdAndOptionalStatus(
+            @Param("sellerId") Long sellerId,
+            @Param("status") PayoutStatus status,
+            Pageable pageable);
+
     /**
      * Returns true if a payout record already exists for this order that is NOT cancelled.
      * Used for idempotency when creating payout for a completed order.

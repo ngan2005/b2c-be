@@ -19,6 +19,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -52,7 +53,18 @@ public class PayoutService {
         Page<SellerPayout> result = (status == null)
                 ? payoutRepository.findAll(pageable)
                 : payoutRepository.findByStatus(status, pageable);
-        return result.map(SellerPayoutDto::from);
+        return result.map(this::toEnrichedDto);
+    }
+
+    /**
+     * Lists payouts belonging specifically to a seller, optionally filtered by status.
+     */
+    @Transactional(readOnly = true)
+    public Page<SellerPayoutDto> listPayoutsForSeller(Long sellerId, PayoutStatus status, int page, int size) {
+        PageRequest pageable = PageRequest.of(Math.max(0, page), Math.min(size, 100),
+                Sort.by(Sort.Direction.DESC, "createdAt"));
+        Page<SellerPayout> result = payoutRepository.findBySellerIdAndOptionalStatus(sellerId, status, pageable);
+        return result.map(this::toEnrichedDto);
     }
 
     /**
@@ -61,7 +73,7 @@ public class PayoutService {
     @Transactional(readOnly = true)
     public SellerPayoutDto getPayout(Long id) {
         return payoutRepository.findById(id)
-                .map(SellerPayoutDto::from)
+                .map(this::toEnrichedDto)
                 .orElseThrow(() -> new ResourceNotFoundException("SellerPayout", "id: " + id));
     }
 
@@ -70,29 +82,66 @@ public class PayoutService {
      */
     @Transactional(readOnly = true)
     public SellerStatementDto getSellerStatement(Long sellerId) {
-        if (!sellerRepository.existsById(sellerId)) {
-            throw new ResourceNotFoundException("Seller", "id: " + sellerId);
-        }
+        Seller seller = sellerRepository.findById(sellerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Seller", "id: " + sellerId));
 
         BigDecimal totalPending = payoutRepository.sumNetAmountBySellerAndStatus(sellerId, PayoutStatus.PENDING);
+        BigDecimal totalReady   = payoutRepository.sumNetAmountBySellerAndStatus(sellerId, PayoutStatus.READY);
         BigDecimal totalPaid    = payoutRepository.sumNetAmountBySellerAndStatus(sellerId, PayoutStatus.PAID);
-        // Lifetime = everything not CANCELLED (PENDING + READY + PAID)
-        BigDecimal totalPendingOrReady = payoutRepository.sumNetAmountBySellerAndStatus(sellerId, PayoutStatus.PENDING);
-        BigDecimal totalReady = payoutRepository.sumNetAmountBySellerAndStatus(sellerId, PayoutStatus.READY);
-        BigDecimal lifetime = totalPending.add(totalPaid).add(totalReady);
+        BigDecimal safePending = totalPending != null ? totalPending : BigDecimal.ZERO;
+        BigDecimal safeReady   = totalReady != null ? totalReady : BigDecimal.ZERO;
+        BigDecimal safePaid    = totalPaid != null ? totalPaid : BigDecimal.ZERO;
+        BigDecimal lifetime    = safePending.add(safeReady).add(safePaid);
 
         List<SellerPayoutDto> recentPayouts = payoutRepository
                 .findBySellerIdAndStatus(sellerId, PayoutStatus.PAID)
                 .stream()
-                .map(SellerPayoutDto::from)
+                .map(this::toEnrichedDto)
                 .toList();
 
         return SellerStatementDto.builder()
-                .totalPending(totalPending != null ? totalPending : BigDecimal.ZERO)
-                .totalPaid(totalPaid != null ? totalPaid : BigDecimal.ZERO)
-                .lifetimeEarned(lifetime != null ? lifetime : BigDecimal.ZERO)
+                .totalPending(safePending)
+                .totalReady(safeReady)
+                .totalPaid(safePaid)
+                .lifetimeEarned(lifetime)
+                .shopName(seller.getShopName())
                 .recentPayouts(recentPayouts)
                 .build();
+    }
+
+    private SellerPayoutDto toEnrichedDto(SellerPayout p) {
+        SellerPayoutDto dto = SellerPayoutDto.from(p);
+        if (p.getOrderId() != null && dto.getOrderCode() == null) {
+            orderRepository.findById(p.getOrderId()).ifPresent(o -> dto.setOrderCode(o.getOrderCode()));
+        }
+        return dto;
+    }
+
+    /**
+     * Allows a seller to submit a payout request, transitioning eligible PENDING payouts to READY.
+     *
+     * @param sellerId seller requesting payout
+     * @return count of payouts moved to READY
+     */
+    @Transactional
+    public int requestPayoutForSeller(Long sellerId) {
+        if (!sellerRepository.existsById(sellerId)) {
+            throw new ResourceNotFoundException("Seller", "id: " + sellerId);
+        }
+
+        List<SellerPayout> pendingPayouts = payoutRepository.findBySellerIdAndStatus(sellerId, PayoutStatus.PENDING);
+        if (pendingPayouts.isEmpty()) {
+            return 0;
+        }
+
+        int count = 0;
+        for (SellerPayout payout : pendingPayouts) {
+            payout.setStatus(PayoutStatus.READY);
+            payoutRepository.save(payout);
+            count++;
+        }
+        log.info("Seller {} requested payout: moved {} pending payout records to READY", sellerId, count);
+        return count;
     }
 
     // ---------------- writes ----------------
@@ -107,15 +156,23 @@ public class PayoutService {
      * @param commissionAmount platform commission for this order (from workstream A)
      * @return the created payout, or null if idempotently skipped
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public SellerPayout createForCompletedOrder(Order order, BigDecimal commissionAmount) {
         if (payoutRepository.existsByOrderIdAndStatusNot(order.getId(), PayoutStatus.CANCELLED)) {
             log.debug("Payout already exists for order {}; skipping", order.getId());
             return null;
         }
 
-        Seller seller = sellerRepository.findById(order.getSellerId())
-                .orElseThrow(() -> new ResourceNotFoundException("Seller", "id: " + order.getSellerId()));
+        if (order.getSellerId() == null) {
+            log.warn("Order {} has no sellerId, skipping payout creation", order.getId());
+            return null;
+        }
+
+        Seller seller = sellerRepository.findById(order.getSellerId()).orElse(null);
+        if (seller == null) {
+            log.warn("Seller {} not found for order {}, skipping payout creation", order.getSellerId(), order.getId());
+            return null;
+        }
 
         BigDecimal gross = order.getTotalAmount();
         BigDecimal net   = gross.subtract(commissionAmount);

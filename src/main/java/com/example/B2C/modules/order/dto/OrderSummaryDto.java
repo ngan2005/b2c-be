@@ -25,7 +25,20 @@ public class OrderSummaryDto {
     private BigDecimal totalAmount;
     private LocalDateTime createdAt;
 
+    // --- Mobile buyer fields (P0.2) ---
+    private String shopName;
+    private String firstProductName;
+    private String firstProductThumbnail;
+    private String firstVariantName;
+    private Integer totalItemsCount;
+
     public static OrderSummaryDto from(Order order) {
+        String effectivePaymentStatus = order.getPaymentStatus();
+        if (order.getStatus() == com.example.B2C.modules.order.entity.OrderStatus.DELIVERED
+                || order.getStatus() == com.example.B2C.modules.order.entity.OrderStatus.COMPLETED) {
+            effectivePaymentStatus = "PAID";
+        }
+
         return OrderSummaryDto.builder()
                 .id(order.getId())
                 .orderCode(order.getOrderCode())
@@ -33,7 +46,7 @@ public class OrderSummaryDto {
                 .sellerId(order.getSellerId())
                 .receiverName(order.getReceiverName())
                 .paymentMethod(order.getPaymentMethod())
-                .paymentStatus(order.getPaymentStatus())
+                .paymentStatus(effectivePaymentStatus)
                 .status(order.getStatus().name())
                 .totalAmount(order.getTotalAmount())
                 .createdAt(order.getCreatedAt())

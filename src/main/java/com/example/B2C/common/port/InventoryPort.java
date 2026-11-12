@@ -32,7 +32,22 @@ public interface InventoryPort {
     void release(Long variantId, int qty);
 
     /**
-     * Convert reserved stock into sold stock. Called when payment is confirmed.
+     * Explicitly release stock held in reservedQuantity (cancel before payment).
+     */
+    void releaseReserved(Long variantId, int qty);
+
+    /**
+     * Explicitly release stock that was confirmed into soldCount (return/refund after payment).
+     */
+    void releaseSold(Long variantId, int qty);
+
+    /**
+     * Convert reserved stock into sold stock. Called when payment is confirmed or order completed.
      */
     void confirm(Long variantId, int qty);
+
+    /**
+     * Reconcile reservedQuantity against actual active unpaid orders to clean up phantom holds.
+     */
+    int reconcileReservations(Long variantId);
 }

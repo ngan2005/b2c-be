@@ -50,13 +50,12 @@ public class E0NoLockStrategy implements InventoryStrategy {
         // both pass the stock >= qty predicate and both decrement.
         int affected = jdbc.update("""
                 UPDATE product_variant
-                   SET stock_quantity = stock_quantity - ?,
-                       reserved_quantity = COALESCE(reserved_quantity, 0) + ?,
+                   SET reserved_quantity = COALESCE(reserved_quantity, 0) + ?,
                        last_reserved_at = ?,
                        version = version + 1
-                 WHERE id = ? AND stock_quantity >= ?
+                 WHERE id = ? AND (stock_quantity - COALESCE(reserved_quantity, 0)) >= ?
                 """,
-                qty, qty, Timestamp.valueOf(LocalDateTime.now()), variantId, qty);
+                qty, Timestamp.valueOf(LocalDateTime.now()), variantId, qty);
 
         if (affected == 0) {
             // Either the row vanished (we checked above) or stock < qty.

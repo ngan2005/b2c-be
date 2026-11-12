@@ -77,14 +77,23 @@ public class PlatformWalletService {
      * @param note         optional free-text note
      * @return the updated wallet
      */
-    @Transactional(propagation = Propagation.MANDATORY)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PlatformWallet credit(BigDecimal amount, String reason,
                                   Long refOrderId, Long refSellerId, String note) {
         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalArgumentException("Credit amount must be positive");
         }
         PlatformWallet wallet = walletRepository.findByIdWithLock(WALLET_ID)
-                .orElseThrow(() -> new IllegalStateException("Platform wallet not initialised"));
+                .orElseGet(() -> {
+                    log.warn("Platform wallet id={} not found with lock, initializing default wallet", WALLET_ID);
+                    PlatformWallet w = PlatformWallet.builder()
+                            .id(WALLET_ID)
+                            .balance(BigDecimal.ZERO)
+                            .totalCredited(BigDecimal.ZERO)
+                            .totalDebited(BigDecimal.ZERO)
+                            .build();
+                    return walletRepository.save(w);
+                });
 
         wallet.setBalance(wallet.getBalance().add(amount));
         wallet.setTotalCredited(wallet.getTotalCredited().add(amount));

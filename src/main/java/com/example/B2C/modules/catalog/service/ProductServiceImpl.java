@@ -8,6 +8,7 @@ import com.example.B2C.common.response.PageResponse;
 import com.example.B2C.modules.catalog.dto.*;
 import com.example.B2C.modules.catalog.entity.*;
 import com.example.B2C.modules.catalog.repository.*;
+import com.example.B2C.modules.catalog.util.SearchQueryUtils;
 import com.example.B2C.modules.seller.entity.Seller;
 import com.example.B2C.modules.seller.entity.SellerStatus;
 import com.example.B2C.modules.seller.repository.SellerRepository;
@@ -21,8 +22,10 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -40,6 +43,7 @@ public class ProductServiceImpl implements ProductService {
     private final ProductImageRepository productImageRepository;
     private final ProductOptionRepository productOptionRepository;
     private final ProductOptionValueRepository productOptionValueRepository;
+    private final VariantOptionValueRepository variantOptionValueRepository;
     private final CategoryRepository categoryRepository;
     private final SellerRepository sellerRepository;
     private final UserPresenceService userPresenceService;
@@ -49,8 +53,8 @@ public class ProductServiceImpl implements ProductService {
             "sold", "soldCount",
             "rating", "ratingAvg",
             "created", "createdAt",
-            "name", "name"
-    );
+            "name", "name",
+            "relevance", "createdAt");
 
     private static final Pattern NON_LATIN = Pattern.compile("[^\\w-]");
     private static final Pattern WHITESPACE = Pattern.compile("[\\s]+");
@@ -73,20 +77,46 @@ public class ProductServiceImpl implements ProductService {
                     request.getSellerId(),
                     request.getMinPrice(),
                     request.getMaxPrice(),
-                    pageable
-            );
+                    request.getBrand(),
+                    request.getMinRating(),
+                    pageable);
         } else {
             String trimmed = keyword.trim();
-            productPage = productRepository.searchProductsFulltext(
-                    ProductStatus.ACTIVE.name(),
-                    request.getCategoryId(),
-                    request.getSellerId(),
-                    request.getMinPrice(),
-                    request.getMaxPrice(),
-                    trimmed,
-                    trimmed.length(),
-                    pageable
-            );
+            String tsQuery = SearchQueryUtils.toPrefixTsQuery(trimmed);
+            Page<Product> ftsPage = null;
+            Pageable ftsPageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+            try {
+                ftsPage = productRepository.searchProductsFulltext(
+                        ProductStatus.ACTIVE.name(),
+                        request.getCategoryId(),
+                        request.getSellerId(),
+                        request.getMinPrice(),
+                        request.getMaxPrice(),
+                        request.getBrand(),
+                        request.getMinRating(),
+                        trimmed,
+                        tsQuery,
+                        request.getSortBy(),
+                        request.getSortDir(),
+                        ftsPageable);
+            } catch (Exception e) {
+                log.warn("FTS search failed for keyword '{}' (tsQuery: '{}'): {}", trimmed, tsQuery, e.getMessage());
+            }
+
+            if (ftsPage != null && !ftsPage.isEmpty()) {
+                productPage = ftsPage;
+            } else {
+                productPage = productRepository.searchProductsWithKeywordLike(
+                        ProductStatus.ACTIVE,
+                        request.getCategoryId(),
+                        request.getSellerId(),
+                        request.getMinPrice(),
+                        request.getMaxPrice(),
+                        request.getBrand(),
+                        request.getMinRating(),
+                        trimmed,
+                        pageable);
+            }
         }
 
         Page<ProductSummaryDto> dtoPage = productPage.map(this::toSummaryDto);
@@ -105,13 +135,23 @@ public class ProductServiceImpl implements ProductService {
         return toDetailDto(product);
     }
 
+    // P1.1 — Look up by numeric ID (mobile app)
+    @Override
+    public ProductDetailDto getProductDetailById(Long id) {
+        Product product = productRepository.findByIdAndDeletedAtIsNull(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Product", "id: " + id));
+        if (product.getStatus() != ProductStatus.ACTIVE) {
+            throw new ResourceNotFoundException("Product", "id: " + id);
+        }
+        return toDetailDto(product);
+    }
+
     @Override
     public PageResponse<ProductSummaryDto> getFeaturedProducts(int page, int size) {
         Pageable pageable = PageRequest.of(
                 Math.max(page, 0),
                 clampSize(size),
-                Sort.by(Sort.Direction.DESC, "soldCount")
-        );
+                Sort.by(Sort.Direction.DESC, "soldCount"));
         Page<Product> productPage = productRepository.findFeatured(pageable);
         return PageResponse.of(productPage.map(this::toSummaryDto));
     }
@@ -121,8 +161,7 @@ public class ProductServiceImpl implements ProductService {
         Pageable pageable = PageRequest.of(
                 Math.max(page, 0),
                 clampSize(size),
-                Sort.by(Sort.Direction.DESC, "createdAt")
-        );
+                Sort.by(Sort.Direction.DESC, "createdAt"));
         Page<Product> productPage = productRepository.findActiveBySeller(sellerId, pageable);
         return PageResponse.of(productPage.map(this::toSummaryDto));
     }
@@ -140,17 +179,26 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public PageResponse<ProductSummaryDto> listProductsForCurrentSeller(Long sellerId, ProductStatus status,
-                                                                       String keyword, int page, int size) {
+            String keyword, int page, int size) {
         Seller seller = getActiveSeller(sellerId);
         Pageable pageable = PageRequest.of(
                 Math.max(page, 0),
                 clampSize(size),
-                Sort.by(Sort.Direction.DESC, "createdAt")
-        );
+                Sort.by(Sort.Direction.DESC, "createdAt"));
         String trimmed = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
-        Page<Product> productPage = (trimmed == null)
-                ? productRepository.findAllBySellerWithoutKeyword(seller, status, pageable)
-                : productRepository.searchProductsSellerFulltext(seller.getId(), status != null ? status.name() : null, trimmed, trimmed.length(), pageable);
+        Page<Product> productPage;
+        if (trimmed == null) {
+            productPage = productRepository.findAllBySellerWithoutKeyword(seller, status, pageable);
+        } else {
+            String tsQuery = SearchQueryUtils.toPrefixTsQuery(trimmed);
+            Pageable ftsPageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+            productPage = productRepository.searchProductsSellerFulltext(
+                    seller.getId(),
+                    status != null ? status.name() : null,
+                    trimmed,
+                    tsQuery,
+                    ftsPageable);
+        }
         return PageResponse.of(productPage.map(this::toSummaryDto));
     }
 
@@ -203,6 +251,8 @@ public class ProductServiceImpl implements ProductService {
         seller.setTotalProduct(seller.getTotalProduct() == null ? 1 : seller.getTotalProduct() + 1);
         sellerRepository.save(seller);
 
+        saveOptionsAndVariants(saved, request.getOptions(), request.getVariants());
+
         log.info("Seller {} created product {} (slug={})", sellerId, saved.getId(), saved.getSlug());
         return toDetailDto(saved);
     }
@@ -233,6 +283,7 @@ public class ProductServiceImpl implements ProductService {
         product.setHeightCm(request.getHeightCm());
 
         Product saved = productRepository.save(product);
+        saveOptionsAndVariants(saved, request.getOptions(), request.getVariants());
         return toDetailDto(saved);
     }
 
@@ -386,7 +437,8 @@ public class ProductServiceImpl implements ProductService {
         Integer shopProductCount = null;
         Boolean shopIsOnline = false;
         if (seller != null) {
-            shopProductCount = (int) productRepository.countBySellerIdAndStatusAndDeletedAtIsNull(seller.getId(), ProductStatus.ACTIVE);
+            shopProductCount = (int) productRepository.countBySellerIdAndStatusAndDeletedAtIsNull(seller.getId(),
+                    ProductStatus.ACTIVE);
             if (seller.getUser() != null && userPresenceService != null) {
                 shopIsOnline = userPresenceService.isUserOnline(seller.getUser().getId());
             }
@@ -420,19 +472,30 @@ public class ProductServiceImpl implements ProductService {
                         .sortOrder(img.getSortOrder())
                         .isThumbnail(img.getIsThumbnail())
                         .build()).collect(Collectors.toList()))
-                .variants(variants.stream().map(v -> ProductVariantDto.builder()
-                        .id(v.getId())
-                        .sku(v.getSku())
-                        .variantName(v.getVariantName())
-                        .price(v.getPrice())
-                        .salePrice(v.getSalePrice())
-                        .stockQuantity(v.getStockQuantity())
-                        .soldCount(v.getSoldCount())
-                        .imageUrl(v.getImageUrl())
-                        .weightGram(v.getWeightGram())
-                        .barcode(v.getBarcode())
-                        .isActive(v.getIsActive())
-                        .build()).collect(Collectors.toList()))
+                .variants(variants.stream().map(v -> {
+                    List<ProductOptionValue> vOptValues = productOptionValueRepository.findByVariantId(v.getId());
+                    Map<String, String> attrs = new java.util.LinkedHashMap<>();
+                    for (ProductOptionValue pov : vOptValues) {
+                        if (pov.getOption() != null) {
+                            attrs.put(pov.getOption().getName(), pov.getValue());
+                        }
+                    }
+                    return ProductVariantDto.builder()
+                            .id(v.getId())
+                            .sku(v.getSku())
+                            .variantName(v.getVariantName())
+                            .price(v.getPrice())
+                            .salePrice(v.getSalePrice())
+                            .stockQuantity(v.getStockQuantity())
+                            .soldCount(v.getSoldCount())
+                            .imageUrl(v.getImageUrl())
+                            .weightGram(v.getWeightGram())
+                            .barcode(v.getBarcode())
+                            .isActive(v.getIsActive())
+                            .optionValueIds(vOptValues.stream().map(ProductOptionValue::getId).collect(Collectors.toList()))
+                            .attributes(attrs)
+                            .build();
+                }).collect(Collectors.toList()))
                 .options(optionDtos)
                 .ratingAvg(product.getRatingAvg())
                 .ratingCount(product.getRatingCount())
@@ -478,7 +541,8 @@ public class ProductServiceImpl implements ProductService {
     }
 
     private int clampSize(int size) {
-        if (size <= 0) return 20;
+        if (size <= 0)
+            return 20;
         return Math.min(size, 100);
     }
 
@@ -492,26 +556,37 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public PageResponse<AdminProductSummaryDto> listProductsForAdmin(ProductStatus status, Long sellerId,
-                                                                     String keyword, int page, int size) {
+            String keyword, int page, int size) {
         Pageable pageable = PageRequest.of(
                 Math.max(page, 0),
                 clampSize(size),
-                Sort.by(Sort.Direction.DESC, "createdAt")
-        );
+                Sort.by(Sort.Direction.DESC, "createdAt"));
         String trimmed = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
 
         org.springframework.data.domain.Page<Product> productPage;
-        if (status != null) {
-            if (trimmed == null) {
+        if (trimmed == null) {
+            if (status != null) {
                 productPage = productRepository.searchProductsWithoutKeyword(
-                        status, null, sellerId, null, null, pageable);
+                        status, null, sellerId, null, null, null, null, pageable);
             } else {
-                productPage = productRepository.searchProductsFulltext(
-                        status.name(), null, sellerId, null, null, trimmed, trimmed.length(), pageable);
+                productPage = productRepository.findAllDeletedAtIsNull(pageable);
             }
         } else {
-            // No status filter — list all non-deleted products (no keyword FTS path needed)
-            productPage = productRepository.findAllDeletedAtIsNull(pageable);
+            String tsQuery = SearchQueryUtils.toPrefixTsQuery(trimmed);
+            Pageable ftsPageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
+            productPage = productRepository.searchProductsFulltext(
+                    status != null ? status.name() : null,
+                    null,
+                    sellerId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    trimmed,
+                    tsQuery,
+                    null,
+                    null,
+                    ftsPageable);
         }
         return PageResponse.of(productPage.map(this::toAdminSummaryDto));
     }
@@ -553,5 +628,157 @@ public class ProductServiceImpl implements ProductService {
                 .status(product.getStatus())
                 .createdAt(product.getCreatedAt())
                 .build();
+    }
+
+    private void saveOptionsAndVariants(Product product, List<ProductOptionRequest> optionRequests, List<ProductVariantRequest> variantRequests) {
+        // 1. Process options if provided
+        Map<String, ProductOptionValue> optionValueLookup = new HashMap<>();
+        if (optionRequests != null && !optionRequests.isEmpty()) {
+            List<ProductOption> existingOptions = productOptionRepository.findByProductIdOrderBySortOrder(product.getId());
+            Map<String, ProductOption> existingOptMap = existingOptions.stream()
+                    .collect(Collectors.toMap(o -> o.getName().trim().toLowerCase(), o -> o, (a, b) -> a));
+
+            int optSort = 0;
+            for (ProductOptionRequest optReq : optionRequests) {
+                if (optReq.getName() == null || optReq.getName().isBlank()) continue;
+                String optName = optReq.getName().trim();
+                ProductOption option = existingOptMap.get(optName.toLowerCase());
+                if (option == null) {
+                    option = ProductOption.builder()
+                            .product(product)
+                            .name(optName)
+                            .sortOrder(optSort++)
+                            .build();
+                    option = productOptionRepository.save(option);
+                }
+
+                if (optReq.getValues() != null) {
+                    List<ProductOptionValue> existingVals = productOptionValueRepository.findByOptionIdOrderBySortOrderAsc(option.getId());
+                    Map<String, ProductOptionValue> existingValMap = existingVals.stream()
+                            .collect(Collectors.toMap(v -> v.getValue().trim().toLowerCase(), v -> v, (a, b) -> a));
+
+                    int valSort = 0;
+                    for (String valStr : optReq.getValues()) {
+                        if (valStr == null || valStr.isBlank()) continue;
+                        String trimmedVal = valStr.trim();
+                        ProductOptionValue pov = existingValMap.get(trimmedVal.toLowerCase());
+                        if (pov == null) {
+                            pov = ProductOptionValue.builder()
+                                    .option(option)
+                                    .value(trimmedVal)
+                                    .sortOrder(valSort++)
+                                    .build();
+                            pov = productOptionValueRepository.save(pov);
+                        }
+                        optionValueLookup.put(optName.toLowerCase() + ":::" + trimmedVal.toLowerCase(), pov);
+                        optionValueLookup.put(trimmedVal.toLowerCase(), pov);
+                    }
+                }
+            }
+        }
+
+        // 2. Process variants
+        if (variantRequests != null && !variantRequests.isEmpty()) {
+            BigDecimal minPrice = null;
+            BigDecimal maxPrice = null;
+            int variantIdx = 0;
+
+            for (ProductVariantRequest vReq : variantRequests) {
+                variantIdx++;
+                ProductVariant variant = null;
+                if (vReq.getId() != null) {
+                    variant = productVariantRepository.findById(vReq.getId()).orElse(null);
+                }
+
+                String sku = (vReq.getSku() != null && !vReq.getSku().isBlank())
+                        ? vReq.getSku().trim()
+                        : generateSku(product.getSlug(), variantIdx);
+
+                if (variant == null) {
+                    if (productVariantRepository.existsBySku(sku)) {
+                        sku = sku + "-" + (System.currentTimeMillis() % 10000);
+                    }
+                    variant = ProductVariant.builder()
+                            .product(product)
+                            .sku(sku)
+                            .build();
+                } else {
+                    if (vReq.getSku() != null && !vReq.getSku().isBlank() && !vReq.getSku().equals(variant.getSku())) {
+                        if (!productVariantRepository.existsBySku(vReq.getSku().trim())) {
+                            variant.setSku(vReq.getSku().trim());
+                        }
+                    }
+                }
+
+                String vName = (vReq.getVariantName() != null && !vReq.getVariantName().isBlank())
+                        ? vReq.getVariantName().trim()
+                        : "Phân loại " + variantIdx;
+
+                BigDecimal price = vReq.getPrice() != null ? vReq.getPrice() : (product.getMinPrice() != null ? product.getMinPrice() : BigDecimal.ZERO);
+                int stock = vReq.getStockQuantity() != null ? Math.max(0, vReq.getStockQuantity()) : 0;
+                int weight = vReq.getWeightGram() != null ? vReq.getWeightGram() : (product.getWeightGram() != null ? product.getWeightGram() : 250);
+
+                variant.setVariantName(vName);
+                variant.setPrice(price);
+                variant.setSalePrice(vReq.getSalePrice());
+                variant.setStockQuantity(stock);
+                variant.setWeightGram(weight);
+                if (vReq.getImageUrl() != null && !vReq.getImageUrl().isBlank()) {
+                    variant.setImageUrl(vReq.getImageUrl());
+                }
+                variant.setIsActive(true);
+
+                ProductVariant savedVariant = productVariantRepository.save(variant);
+
+                if (minPrice == null || price.compareTo(minPrice) < 0) minPrice = price;
+                if (maxPrice == null || price.compareTo(maxPrice) > 0) maxPrice = price;
+
+                // Link variant_option_value
+                if (vReq.getOptionValues() != null && !vReq.getOptionValues().isEmpty()) {
+                    variantOptionValueRepository.deleteByVariantId(savedVariant.getId());
+                    for (String optValStr : vReq.getOptionValues()) {
+                        if (optValStr == null || optValStr.isBlank()) continue;
+                        ProductOptionValue matchedPov = optionValueLookup.get(optValStr.trim().toLowerCase());
+                        if (matchedPov != null) {
+                            VariantOptionValue vov = VariantOptionValue.builder()
+                                    .id(new VariantOptionValueId(savedVariant.getId(), matchedPov.getId()))
+                                    .variant(savedVariant)
+                                    .optionValue(matchedPov)
+                                    .build();
+                            variantOptionValueRepository.save(vov);
+                        }
+                    }
+                }
+            }
+
+            if (minPrice != null && maxPrice != null) {
+                product.setMinPrice(minPrice);
+                product.setMaxPrice(maxPrice);
+                productRepository.save(product);
+            }
+        } else {
+            List<ProductVariant> existing = productVariantRepository.findAllByProductId(product.getId());
+            if (existing.isEmpty()) {
+                String sku = generateSku(product.getSlug(), 1);
+                ProductVariant defaultVariant = ProductVariant.builder()
+                        .product(product)
+                        .sku(sku)
+                        .variantName("Mặc định")
+                        .price(product.getMinPrice() != null ? product.getMinPrice() : BigDecimal.valueOf(100000))
+                        .salePrice(null)
+                        .stockQuantity(100)
+                        .soldCount(0)
+                        .weightGram(product.getWeightGram() != null ? product.getWeightGram() : 250)
+                        .isActive(true)
+                        .build();
+                productVariantRepository.save(defaultVariant);
+            }
+        }
+    }
+
+    private String generateSku(String slug, int idx) {
+        String clean = (slug != null ? slug.toUpperCase().replaceAll("[^A-Z0-9]", "-") : "SKU");
+        if (clean.length() > 20) clean = clean.substring(0, 20);
+        return clean + "-V" + idx + "-" + (System.currentTimeMillis() % 10000);
     }
 }

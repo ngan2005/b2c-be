@@ -42,4 +42,24 @@ public class CartItemDto {
 
     @Schema(description = "ISO-8601 timestamp when the item was added to cart", example = "2024-01-10T09:00:00")
     private LocalDateTime addedAt;
+
+    // --- Mobile buyer fields (P0.1) ---
+
+    @Schema(description = "Parent product ID", example = "5")
+    private Long productId;
+
+    @Schema(description = "Parent product slug", example = "premium-cotton-t-shirt")
+    private String productSlug;
+
+    @Schema(description = "Seller ID", example = "2")
+    private Long sellerId;
+
+    @Schema(description = "Shop name", example = "Fashion Store")
+    private String shopName;
+
+    @Schema(description = "Current stock quantity of the variant", example = "50")
+    private Integer stockQuantity;
+
+    @Schema(description = "Whether the variant is currently available for purchase", example = "true")
+    private Boolean isAvailable;
 }
