@@ -53,7 +53,8 @@ public class ProductServiceImpl implements ProductService {
             "sold", "soldCount",
             "rating", "ratingAvg",
             "created", "createdAt",
-            "name", "name");
+            "name", "name",
+            "relevance", "createdAt");
 
     private static final Pattern NON_LATIN = Pattern.compile("[^\\w-]");
     private static final Pattern WHITESPACE = Pattern.compile("[\\s]+");
@@ -83,6 +84,7 @@ public class ProductServiceImpl implements ProductService {
             String trimmed = keyword.trim();
             String tsQuery = SearchQueryUtils.toPrefixTsQuery(trimmed);
             Page<Product> ftsPage = null;
+            Pageable ftsPageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
             try {
                 ftsPage = productRepository.searchProductsFulltext(
                         ProductStatus.ACTIVE.name(),
@@ -94,7 +96,9 @@ public class ProductServiceImpl implements ProductService {
                         request.getMinRating(),
                         trimmed,
                         tsQuery,
-                        pageable);
+                        request.getSortBy(),
+                        request.getSortDir(),
+                        ftsPageable);
             } catch (Exception e) {
                 log.warn("FTS search failed for keyword '{}' (tsQuery: '{}'): {}", trimmed, tsQuery, e.getMessage());
             }
@@ -187,12 +191,13 @@ public class ProductServiceImpl implements ProductService {
             productPage = productRepository.findAllBySellerWithoutKeyword(seller, status, pageable);
         } else {
             String tsQuery = SearchQueryUtils.toPrefixTsQuery(trimmed);
+            Pageable ftsPageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
             productPage = productRepository.searchProductsSellerFulltext(
                     seller.getId(),
                     status != null ? status.name() : null,
                     trimmed,
                     tsQuery,
-                    pageable);
+                    ftsPageable);
         }
         return PageResponse.of(productPage.map(this::toSummaryDto));
     }
@@ -568,6 +573,7 @@ public class ProductServiceImpl implements ProductService {
             }
         } else {
             String tsQuery = SearchQueryUtils.toPrefixTsQuery(trimmed);
+            Pageable ftsPageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
             productPage = productRepository.searchProductsFulltext(
                     status != null ? status.name() : null,
                     null,
@@ -578,7 +584,9 @@ public class ProductServiceImpl implements ProductService {
                     null,
                     trimmed,
                     tsQuery,
-                    pageable);
+                    null,
+                    null,
+                    ftsPageable);
         }
         return PageResponse.of(productPage.map(this::toAdminSummaryDto));
     }

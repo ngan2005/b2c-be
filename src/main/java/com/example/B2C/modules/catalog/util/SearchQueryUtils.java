@@ -63,7 +63,7 @@ public final class SearchQueryUtils {
             if (i > 0) {
                 sb.append(" & ");
             }
-            sb.append("'").append(tokens.get(i)).append("'");
+            sb.append(tokens.get(i));
             if (i == tokens.size() - 1) {
                 sb.append(":*");
             }

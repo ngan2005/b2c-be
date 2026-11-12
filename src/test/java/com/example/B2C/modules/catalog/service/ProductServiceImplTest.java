@@ -141,7 +141,7 @@ class ProductServiceImplTest {
         when(productRepository.searchProductsFulltext(
                 eq(ProductStatus.ACTIVE.name()), isNull(), isNull(),
                 isNull(), isNull(), isNull(), isNull(),
-                eq("iphone"), eq("'iphone':*"), any(Pageable.class))
+                eq("iphone"), eq("iphone:*"), any(), any(), any(Pageable.class))
         ).thenReturn(ftsPage);
 
         PageResponse<ProductSummaryDto> result = productService.searchProducts(request);

@@ -30,35 +30,35 @@ class SearchQueryUtilsTest {
     @DisplayName("toPrefixTsQuery converts single word to prefix query")
     void toPrefixTsQuery_singleWord_appendsPrefix() {
         String result = SearchQueryUtils.toPrefixTsQuery("iphone");
-        assertThat(result).isEqualTo("'iphone':*");
+        assertThat(result).isEqualTo("iphone:*");
     }
 
     @Test
     @DisplayName("toPrefixTsQuery converts multiple words with prefix on last token")
     void toPrefixTsQuery_multiWord_appendsPrefixOnLastTokenOnly() {
         String result = SearchQueryUtils.toPrefixTsQuery("iphone 15 pro max");
-        assertThat(result).isEqualTo("'iphone' & '15' & 'pro' & 'max':*");
+        assertThat(result).isEqualTo("iphone & 15 & pro & max:*");
     }
 
     @Test
     @DisplayName("toPrefixTsQuery handles Vietnamese accented and unaccented terms")
     void toPrefixTsQuery_vietnameseAccents_unaccentedAndPrefixed() {
         String result = SearchQueryUtils.toPrefixTsQuery("áo thun nam");
-        assertThat(result).isEqualTo("'ao' & 'thun' & 'nam':*");
+        assertThat(result).isEqualTo("ao & thun & nam:*");
     }
 
     @Test
     @DisplayName("toPrefixTsQuery handles letter 'đ' and 'Đ' properly")
     void toPrefixTsQuery_handlesLetterD_correctly() {
         String result = SearchQueryUtils.toPrefixTsQuery("Đồng hồ nam");
-        assertThat(result).isEqualTo("'dong' & 'ho' & 'nam':*");
+        assertThat(result).isEqualTo("dong & ho & nam:*");
     }
 
     @Test
     @DisplayName("toPrefixTsQuery strips punctuation and handles partial typing")
     void toPrefixTsQuery_partialTyping_handlesSpecialChars() {
         String result = SearchQueryUtils.toPrefixTsQuery("áo thun - n");
-        assertThat(result).isEqualTo("'ao' & 'thun' & 'n':*");
+        assertThat(result).isEqualTo("ao & thun & n:*");
     }
 
     @ParameterizedTest

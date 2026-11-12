@@ -108,27 +108,34 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
         SELECT p.* FROM product p
         LEFT JOIN category c ON p.category_id = c.id
         WHERE p.deleted_at IS NULL
-          AND (:status IS NULL OR p.status = :status)
+          AND (CAST(:status AS VARCHAR) IS NULL OR p.status = CAST(:status AS VARCHAR))
           AND (
             CAST(:categoryId AS BIGINT) IS NULL 
             OR p.category_id = CAST(:categoryId AS BIGINT)
             OR c.parent_id = CAST(:categoryId AS BIGINT)
           )
-          AND (:sellerId IS NULL OR p.seller_id = :sellerId)
-          AND (:minPrice IS NULL OR p.min_price >= :minPrice)
-          AND (:maxPrice IS NULL OR p.max_price <= :maxPrice)
-          AND (:brand IS NULL OR p.brand = :brand)
-          AND (:minRating IS NULL OR p.rating_avg >= :minRating)
+          AND (CAST(:sellerId AS BIGINT) IS NULL OR p.seller_id = CAST(:sellerId AS BIGINT))
+          AND (CAST(:minPrice AS NUMERIC) IS NULL OR p.min_price >= CAST(:minPrice AS NUMERIC))
+          AND (CAST(:maxPrice AS NUMERIC) IS NULL OR p.max_price <= CAST(:maxPrice AS NUMERIC))
+          AND (CAST(:brand AS VARCHAR) IS NULL OR p.brand = CAST(:brand AS VARCHAR))
+          AND (CAST(:minRating AS NUMERIC) IS NULL OR p.rating_avg >= CAST(:minRating AS NUMERIC))
           AND (
-            (:tsQuery IS NOT NULL AND p.search_vector @@ to_tsquery('simple', :tsQuery))
-            OR p.name ILIKE '%' || :q || '%'
-            OR p.brand ILIKE '%' || :q || '%'
-            OR p.description ILIKE '%' || :q || '%'
+            (CAST(:tsQuery AS TEXT) IS NOT NULL AND p.search_vector @@ to_tsquery('simple', CAST(:tsQuery AS TEXT)))
+            OR p.name ILIKE '%' || CAST(:q AS TEXT) || '%'
+            OR p.brand ILIKE '%' || CAST(:q AS TEXT) || '%'
+            OR p.description ILIKE '%' || CAST(:q AS TEXT) || '%'
           )
         ORDER BY
+          CASE WHEN CAST(:sortBy AS VARCHAR) = 'price' AND LOWER(CAST(:sortDir AS VARCHAR)) = 'asc' THEN p.min_price END ASC NULLS LAST,
+          CASE WHEN CAST(:sortBy AS VARCHAR) = 'price' AND LOWER(CAST(:sortDir AS VARCHAR)) = 'desc' THEN p.min_price END DESC NULLS LAST,
+          CASE WHEN CAST(:sortBy AS VARCHAR) = 'sold' THEN p.sold_count END DESC NULLS LAST,
+          CASE WHEN CAST(:sortBy AS VARCHAR) = 'rating' THEN p.rating_avg END DESC NULLS LAST,
+          CASE WHEN CAST(:sortBy AS VARCHAR) = 'created' AND LOWER(CAST(:sortDir AS VARCHAR)) = 'asc' THEN p.created_at END ASC NULLS LAST,
+          CASE WHEN CAST(:sortBy AS VARCHAR) = 'created' AND (LOWER(CAST(:sortDir AS VARCHAR)) = 'desc' OR CAST(:sortDir AS VARCHAR) IS NULL) THEN p.created_at END DESC NULLS LAST,
           CASE 
-            WHEN :tsQuery IS NOT NULL AND p.search_vector @@ to_tsquery('simple', :tsQuery)
-            THEN ts_rank(p.search_vector, to_tsquery('simple', :tsQuery))
+            WHEN (CAST(:sortBy AS VARCHAR) = 'relevance' OR CAST(:sortBy AS VARCHAR) IS NULL OR CAST(:sortBy AS VARCHAR) = '')
+                 AND CAST(:tsQuery AS TEXT) IS NOT NULL AND p.search_vector @@ to_tsquery('simple', CAST(:tsQuery AS TEXT))
+            THEN ts_rank(p.search_vector, to_tsquery('simple', CAST(:tsQuery AS TEXT)))
             ELSE 0 
           END DESC,
           p.created_at DESC
@@ -137,22 +144,22 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
         SELECT count(p.id) FROM product p
         LEFT JOIN category c ON p.category_id = c.id
         WHERE p.deleted_at IS NULL
-          AND (:status IS NULL OR p.status = :status)
+          AND (CAST(:status AS VARCHAR) IS NULL OR p.status = CAST(:status AS VARCHAR))
           AND (
             CAST(:categoryId AS BIGINT) IS NULL 
             OR p.category_id = CAST(:categoryId AS BIGINT)
             OR c.parent_id = CAST(:categoryId AS BIGINT)
           )
-          AND (:sellerId IS NULL OR p.seller_id = :sellerId)
-          AND (:minPrice IS NULL OR p.min_price >= :minPrice)
-          AND (:maxPrice IS NULL OR p.max_price <= :maxPrice)
-          AND (:brand IS NULL OR p.brand = :brand)
-          AND (:minRating IS NULL OR p.rating_avg >= :minRating)
+          AND (CAST(:sellerId AS BIGINT) IS NULL OR p.seller_id = CAST(:sellerId AS BIGINT))
+          AND (CAST(:minPrice AS NUMERIC) IS NULL OR p.min_price >= CAST(:minPrice AS NUMERIC))
+          AND (CAST(:maxPrice AS NUMERIC) IS NULL OR p.max_price <= CAST(:maxPrice AS NUMERIC))
+          AND (CAST(:brand AS VARCHAR) IS NULL OR p.brand = CAST(:brand AS VARCHAR))
+          AND (CAST(:minRating AS NUMERIC) IS NULL OR p.rating_avg >= CAST(:minRating AS NUMERIC))
           AND (
-            (:tsQuery IS NOT NULL AND p.search_vector @@ to_tsquery('simple', :tsQuery))
-            OR p.name ILIKE '%' || :q || '%'
-            OR p.brand ILIKE '%' || :q || '%'
-            OR p.description ILIKE '%' || :q || '%'
+            (CAST(:tsQuery AS TEXT) IS NOT NULL AND p.search_vector @@ to_tsquery('simple', CAST(:tsQuery AS TEXT)))
+            OR p.name ILIKE '%' || CAST(:q AS TEXT) || '%'
+            OR p.brand ILIKE '%' || CAST(:q AS TEXT) || '%'
+            OR p.description ILIKE '%' || CAST(:q AS TEXT) || '%'
           )
         """)
     Page<Product> searchProductsFulltext(
@@ -165,6 +172,8 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
             @Param("minRating") BigDecimal minRating,
             @Param("q") String q,
             @Param("tsQuery") String tsQuery,
+            @Param("sortBy") String sortBy,
+            @Param("sortDir") String sortDir,
             Pageable pageable
     );
 
@@ -174,18 +183,18 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
     @Query(value = """
         SELECT p.* FROM product p
         WHERE p.deleted_at IS NULL
-          AND p.seller_id = :sellerId
-          AND (:status IS NULL OR p.status = :status)
+          AND p.seller_id = CAST(:sellerId AS BIGINT)
+          AND (CAST(:status AS VARCHAR) IS NULL OR p.status = CAST(:status AS VARCHAR))
           AND (
-            (:tsQuery IS NOT NULL AND p.search_vector @@ to_tsquery('simple', :tsQuery))
-            OR p.name ILIKE '%' || :q || '%'
-            OR p.brand ILIKE '%' || :q || '%'
-            OR p.description ILIKE '%' || :q || '%'
+            (CAST(:tsQuery AS TEXT) IS NOT NULL AND p.search_vector @@ to_tsquery('simple', CAST(:tsQuery AS TEXT)))
+            OR p.name ILIKE '%' || CAST(:q AS TEXT) || '%'
+            OR p.brand ILIKE '%' || CAST(:q AS TEXT) || '%'
+            OR p.description ILIKE '%' || CAST(:q AS TEXT) || '%'
           )
         ORDER BY
           CASE 
-            WHEN :tsQuery IS NOT NULL AND p.search_vector @@ to_tsquery('simple', :tsQuery)
-            THEN ts_rank(p.search_vector, to_tsquery('simple', :tsQuery))
+            WHEN CAST(:tsQuery AS TEXT) IS NOT NULL AND p.search_vector @@ to_tsquery('simple', CAST(:tsQuery AS TEXT))
+            THEN ts_rank(p.search_vector, to_tsquery('simple', CAST(:tsQuery AS TEXT)))
             ELSE 0 
           END DESC,
           p.created_at DESC
@@ -193,13 +202,13 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
         countQuery = """
         SELECT count(p.id) FROM product p
         WHERE p.deleted_at IS NULL
-          AND p.seller_id = :sellerId
-          AND (:status IS NULL OR p.status = :status)
+          AND p.seller_id = CAST(:sellerId AS BIGINT)
+          AND (CAST(:status AS VARCHAR) IS NULL OR p.status = CAST(:status AS VARCHAR))
           AND (
-            (:tsQuery IS NOT NULL AND p.search_vector @@ to_tsquery('simple', :tsQuery))
-            OR p.name ILIKE '%' || :q || '%'
-            OR p.brand ILIKE '%' || :q || '%'
-            OR p.description ILIKE '%' || :q || '%'
+            (CAST(:tsQuery AS TEXT) IS NOT NULL AND p.search_vector @@ to_tsquery('simple', CAST(:tsQuery AS TEXT)))
+            OR p.name ILIKE '%' || CAST(:q AS TEXT) || '%'
+            OR p.brand ILIKE '%' || CAST(:q AS TEXT) || '%'
+            OR p.description ILIKE '%' || CAST(:q AS TEXT) || '%'
           )
         """)
     Page<Product> searchProductsSellerFulltext(
