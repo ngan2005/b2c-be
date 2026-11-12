@@ -39,10 +39,26 @@ public class VnPayService {
         String txnRef = order.getOrderCode() + "_" + System.currentTimeMillis();
         String amountStr = order.getTotalAmount().multiply(BigDecimal.valueOf(100)).toBigInteger().toString();
 
+        // Sanitize client IP: VNPay rejects IPv6 (containing ':')
+        String validIp = (clientIp != null && !clientIp.isBlank() && !clientIp.contains(":")) ? clientIp : "127.0.0.1";
+
+        // VNPay 2.1.0 requires vnp_CreateDate and vnp_ExpireDate in yyyyMMddHHmmss format (Asia/Ho_Chi_Minh GMT+7)
+        TimeZone vnTimeZone = TimeZone.getTimeZone("Asia/Ho_Chi_Minh");
+        Calendar calendar = Calendar.getInstance(vnTimeZone);
+        SimpleDateFormat formatter = new SimpleDateFormat("yyyyMMddHHmmss");
+        formatter.setTimeZone(vnTimeZone);
+        String createDate = formatter.format(calendar.getTime());
+
+        calendar.add(Calendar.MINUTE, 15);
+        String expireDate = formatter.format(calendar.getTime());
+
         Map<String, String> params = new TreeMap<>();  // TreeMap keeps keys alphabetically sorted
         params.put("vnp_Amount", amountStr);
         params.put("vnp_Command", config.getCommand());
+        params.put("vnp_CreateDate", createDate);
         params.put("vnp_CurrCode", config.getCurrencyCode());
+        params.put("vnp_ExpireDate", expireDate);
+        params.put("vnp_IpAddr", validIp);
         params.put("vnp_Locale", config.getLocale());
         params.put("vnp_OrderInfo", "Thanh toan don hang " + order.getOrderCode());
         params.put("vnp_OrderType", "other");
@@ -50,7 +66,6 @@ public class VnPayService {
         params.put("vnp_TmnCode", config.getTmnCode());
         params.put("vnp_TxnRef", txnRef);
         params.put("vnp_Version", config.getVersion());
-        params.put("vnp_IpAddr", clientIp);
 
         // Optional: bank code if known
         // params.put("vnp_BankCode", bankCode);
@@ -60,22 +75,27 @@ public class VnPayService {
         StringBuilder queryString = new StringBuilder();
 
         for (Map.Entry<String, String> entry : params.entrySet()) {
-            String encodedKey = urlEncode(entry.getKey());
-            String encodedValue = urlEncode(entry.getValue());
+            String value = entry.getValue();
+            if (value != null && !value.isEmpty()) {
+                String encodedKey = urlEncode(entry.getKey());
+                String encodedValue = urlEncode(value);
 
-            hashData.append(encodedKey).append("=").append(encodedValue).append(AMPERSAND);
-            queryString.append(encodedKey).append("=").append(encodedValue).append(AMPERSAND);
+                // Build hash data (in VNPay standard, fieldName is raw, value is urlEncoded)
+                hashData.append(entry.getKey()).append("=").append(encodedValue).append(AMPERSAND);
+                queryString.append(encodedKey).append("=").append(encodedValue).append(AMPERSAND);
+            }
         }
 
         // Remove trailing &
         String hashInput = hashData.substring(0, hashData.length() - 1);
         String secureHash = hmacSha512(hashInput, config.getHashSecret());
 
-        queryString.append("vnp_SecureHashType=HmacSHA512");
-        queryString.append(AMPERSAND);
+        // In VNPay 2.1.0, only append vnp_SecureHash (vnp_SecureHashType is obsolete and cause errors)
         queryString.append("vnp_SecureHash=").append(secureHash);
 
-        return config.getPayUrl() + "?" + queryString;
+        String paymentUrl = config.getPayUrl() + "?" + queryString;
+        log.info("Generated VNPay paymentUrl: {}", paymentUrl);
+        return paymentUrl;
     }
 
     /**
@@ -110,7 +130,7 @@ public class VnPayService {
         // Build hash input in alphabetical order
         StringBuilder hashData = new StringBuilder();
         for (Map.Entry<String, String> entry : sortedParams.entrySet()) {
-            hashData.append(urlEncode(entry.getKey()))
+            hashData.append(entry.getKey())
                     .append("=")
                     .append(urlEncode(entry.getValue()))
                     .append(AMPERSAND);
@@ -186,15 +206,14 @@ public class VnPayService {
     private static String bytesToHex(byte[] bytes) {
         StringBuilder sb = new StringBuilder(bytes.length * 2);
         for (byte b : bytes) {
-            sb.append(String.format("%02x", b));
+            sb.append(String.format("%02x", b & 0xff));
         }
         return sb.toString();
     }
 
     private static String urlEncode(String value) {
         try {
-            return URLEncoder.encode(value, StandardCharsets.UTF_8.toString())
-                    .replace("+", "%20");
+            return URLEncoder.encode(value, StandardCharsets.US_ASCII.toString());
         } catch (Exception e) {
             return value;
         }

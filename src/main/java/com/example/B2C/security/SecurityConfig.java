@@ -85,6 +85,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/products/**", "/api/v1/categories/**", "/api/v1/promotions/**", "/api/v1/promotions", "/api/v1/public/**").permitAll()
                 .requestMatchers("/api/v1/public/**").permitAll()
                 .requestMatchers("/api/v1/upload", "/api/v1/upload/**").permitAll()
+                .requestMatchers("/api/v1/payments/return", "/api/v1/payments/callback").permitAll()
                 .requestMatchers("/api/v1/ai/**").permitAll()
                 .requestMatchers("/api/v1/__debug/**").permitAll()
                 // SockJS handshake + fallback transport endpoints (xhr-streaming,

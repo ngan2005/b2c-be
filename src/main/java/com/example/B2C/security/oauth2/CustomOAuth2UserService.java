@@ -193,8 +193,8 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
      * Resolve a User row for the given social identity, linking by email if
      * possible, or creating a new BUYER account otherwise.
      */
-    private User resolveOrCreate(AuthProvider provider, String providerUserId,
-                                 String email, String fullName, String avatarUrl) {
+    public User resolveOrCreate(AuthProvider provider, String providerUserId,
+                                String email, String fullName, String avatarUrl) {
         // 1. Existing social identity?
         Optional<User> bySocial = userRepository.findByProviderAndProviderUserId(provider, providerUserId);
         if (bySocial.isPresent()) {

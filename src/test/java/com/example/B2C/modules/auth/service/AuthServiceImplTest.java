@@ -49,6 +49,8 @@ class AuthServiceImplTest {
     @Mock private JwtTokenProvider jwtTokenProvider;
     @Mock private AuthenticationManager authenticationManager;
     @Mock private CustomUserDetailsService userDetailsService;
+    @Mock private com.example.B2C.security.oauth2.GoogleTokenVerifier googleTokenVerifier;
+    @Mock private com.example.B2C.security.oauth2.CustomOAuth2UserService customOAuth2UserService;
 
     @InjectMocks private AuthServiceImpl authService;
 
@@ -222,6 +224,56 @@ class AuthServiceImplTest {
             assertThatThrownBy(() -> authService.login(loginRequest))
                     .isInstanceOf(BadCredentialsException.class)
                     .hasMessage("Email không tồn tại trong hệ thống");
+        }
+    }
+
+    @Nested
+    @DisplayName("loginWithGoogle()")
+    class LoginWithGoogleTests {
+
+        @Test
+        @DisplayName("Valid ID token authenticates and returns AuthResponse")
+        void validGoogleToken_returnsAuthResponse() {
+            String token = "valid-google-id-token";
+            com.example.B2C.modules.auth.dto.GoogleLoginRequest request =
+                    new com.example.B2C.modules.auth.dto.GoogleLoginRequest(token);
+
+            com.example.B2C.security.oauth2.GoogleTokenVerifier.GoogleUserPayload payload =
+                    new com.example.B2C.security.oauth2.GoogleTokenVerifier.GoogleUserPayload(
+                            "google-sub-123",
+                            "test@gmail.com",
+                            "Google User",
+                            "https://avatar.url"
+                    );
+
+            User user = User.builder()
+                    .id(99L)
+                    .email("test@gmail.com")
+                    .fullName("Google User")
+                    .role(buyerRole)
+                    .roles(new HashSet<>(java.util.Set.of(buyerRole)))
+                    .status(UserStatus.ACTIVE)
+                    .build();
+
+            when(googleTokenVerifier.verify(token)).thenReturn(payload);
+            when(customOAuth2UserService.resolveOrCreate(
+                    com.example.B2C.modules.user.entity.AuthProvider.GOOGLE,
+                    "google-sub-123",
+                    "test@gmail.com",
+                    "Google User",
+                    "https://avatar.url"
+            )).thenReturn(user);
+
+            when(jwtTokenProvider.generateToken(any(), any())).thenReturn("mock-access-token");
+            when(jwtTokenProvider.generateRefreshToken(any())).thenReturn("mock-refresh-token");
+
+            AuthResponse response = authService.loginWithGoogle(request);
+
+            assertThat(response).isNotNull();
+            assertThat(response.getAccessToken()).isEqualTo("mock-access-token");
+            assertThat(response.getRefreshToken()).isEqualTo("mock-refresh-token");
+            assertThat(response.getEmail()).isEqualTo("test@gmail.com");
+            assertThat(response.getRole()).isEqualTo("BUYER");
         }
     }
 }

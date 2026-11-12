@@ -89,7 +89,10 @@ public class PaymentController {
         String frontendBase;
         try {
             String returnUrl = vnpayConfig.getReturnUrl();
-            int idx = returnUrl.indexOf("/payment/return");
+            int idx = returnUrl.indexOf("/api/v1/payments/return");
+            if (idx < 0) {
+                idx = returnUrl.indexOf("/payment/return");
+            }
             frontendBase = idx > 0 ? returnUrl.substring(0, idx) : "http://localhost:5173";
         } catch (Exception e) {
             frontendBase = "http://localhost:5173";
