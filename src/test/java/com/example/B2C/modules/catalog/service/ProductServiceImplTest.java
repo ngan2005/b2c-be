@@ -129,6 +129,29 @@ class ProductServiceImplTest {
     }
 
     @Test
+    @DisplayName("searchProducts - FTS hits return results without falling back to LIKE")
+    void searchProducts_ftsHits_returnsResults() {
+        ProductSearchRequest request = ProductSearchRequest.builder()
+                .keyword("iphone")
+                .page(0)
+                .size(20)
+                .build();
+
+        Page<Product> ftsPage = new PageImpl<>(List.of(sampleProduct), PageRequest.of(0, 20), 1);
+        when(productRepository.searchProductsFulltext(
+                eq(ProductStatus.ACTIVE.name()), isNull(), isNull(),
+                isNull(), isNull(), isNull(), isNull(),
+                eq("iphone"), eq("'iphone':*"), any(Pageable.class))
+        ).thenReturn(ftsPage);
+
+        PageResponse<ProductSummaryDto> result = productService.searchProducts(request);
+
+        assertThat(result.getContent()).hasSize(1);
+        assertThat(result.getContent().get(0).getSlug()).isEqualTo("iphone-15-pro");
+        verify(productRepository, never()).searchProductsWithKeywordLike(any(), any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     @DisplayName("searchProducts - invalid price range throws BadRequestException")
     void searchProducts_invalidPriceRange_throwsException() {
         ProductSearchRequest request = ProductSearchRequest.builder()

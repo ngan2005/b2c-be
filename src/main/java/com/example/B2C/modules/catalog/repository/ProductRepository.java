@@ -90,19 +90,17 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
     );
 
     /**
-     * Full-text search on products via tsvector.
+     * Full-text search on products via tsvector with prefix support and trigram fallback.
      *
-     * Uses websearch_to_tsquery so the caller can pass plain words (ANDed),
-     * quoted phrases (exact match), -exclusion, or bare words (ORed in websearch mode).
-     * The trigram index on name/description acts as a secondary plan for very short
-     * queries (&lt; 2 chars) where websearch_to_tsquery has no result.
-     *
-     * @param status     product status filter
+     * @param status     product status filter (optional)
      * @param categoryId optional category filter
      * @param sellerId   optional seller filter
      * @param minPrice   optional min price
      * @param maxPrice   optional max price
-     * @param q          raw search string — passed verbatim to websearch_to_tsquery
+     * @param brand      optional brand filter
+     * @param minRating  optional min rating
+     * @param q          raw search string for ILIKE matching
+     * @param tsQuery    formatted tsquery string with prefix wildcard (:*)
      * @param pageable   pagination
      * @return matching products ordered by relevance then recency
      */
@@ -110,7 +108,7 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
         SELECT p.* FROM product p
         LEFT JOIN category c ON p.category_id = c.id
         WHERE p.deleted_at IS NULL
-          AND p.status = :status
+          AND (:status IS NULL OR p.status = :status)
           AND (
             CAST(:categoryId AS BIGINT) IS NULL 
             OR p.category_id = CAST(:categoryId AS BIGINT)
@@ -122,21 +120,24 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
           AND (:brand IS NULL OR p.brand = :brand)
           AND (:minRating IS NULL OR p.rating_avg >= :minRating)
           AND (
-            p.search_vector @@ websearch_to_tsquery('simple', public.immutable_unaccent(:q))
-            OR (:q_len < 2 AND (
-                p.name ILIKE '%' || :q || '%'
-                OR p.description ILIKE '%' || :q || '%'
-            ))
+            (:tsQuery IS NOT NULL AND p.search_vector @@ to_tsquery('simple', :tsQuery))
+            OR p.name ILIKE '%' || :q || '%'
+            OR p.brand ILIKE '%' || :q || '%'
+            OR p.description ILIKE '%' || :q || '%'
           )
         ORDER BY
-          ts_rank(p.search_vector, websearch_to_tsquery('simple', public.immutable_unaccent(:q))) DESC,
+          CASE 
+            WHEN :tsQuery IS NOT NULL AND p.search_vector @@ to_tsquery('simple', :tsQuery)
+            THEN ts_rank(p.search_vector, to_tsquery('simple', :tsQuery))
+            ELSE 0 
+          END DESC,
           p.created_at DESC
         """, nativeQuery = true,
         countQuery = """
         SELECT count(p.id) FROM product p
         LEFT JOIN category c ON p.category_id = c.id
         WHERE p.deleted_at IS NULL
-          AND p.status = :status
+          AND (:status IS NULL OR p.status = :status)
           AND (
             CAST(:categoryId AS BIGINT) IS NULL 
             OR p.category_id = CAST(:categoryId AS BIGINT)
@@ -148,11 +149,10 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
           AND (:brand IS NULL OR p.brand = :brand)
           AND (:minRating IS NULL OR p.rating_avg >= :minRating)
           AND (
-            p.search_vector @@ websearch_to_tsquery('simple', public.immutable_unaccent(:q))
-            OR (:q_len < 2 AND (
-                p.name ILIKE '%' || :q || '%'
-                OR p.description ILIKE '%' || :q || '%'
-            ))
+            (:tsQuery IS NOT NULL AND p.search_vector @@ to_tsquery('simple', :tsQuery))
+            OR p.name ILIKE '%' || :q || '%'
+            OR p.brand ILIKE '%' || :q || '%'
+            OR p.description ILIKE '%' || :q || '%'
           )
         """)
     Page<Product> searchProductsFulltext(
@@ -164,7 +164,7 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
             @Param("brand") String brand,
             @Param("minRating") BigDecimal minRating,
             @Param("q") String q,
-            @Param("q_len") int qLen,
+            @Param("tsQuery") String tsQuery,
             Pageable pageable
     );
 
@@ -177,14 +177,17 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
           AND p.seller_id = :sellerId
           AND (:status IS NULL OR p.status = :status)
           AND (
-            p.search_vector @@ websearch_to_tsquery('simple', public.immutable_unaccent(:q))
-            OR (:q_len < 2 AND (
-                p.name ILIKE '%' || :q || '%'
-                OR p.description ILIKE '%' || :q || '%'
-            ))
+            (:tsQuery IS NOT NULL AND p.search_vector @@ to_tsquery('simple', :tsQuery))
+            OR p.name ILIKE '%' || :q || '%'
+            OR p.brand ILIKE '%' || :q || '%'
+            OR p.description ILIKE '%' || :q || '%'
           )
         ORDER BY
-          ts_rank(p.search_vector, websearch_to_tsquery('simple', public.immutable_unaccent(:q))) DESC,
+          CASE 
+            WHEN :tsQuery IS NOT NULL AND p.search_vector @@ to_tsquery('simple', :tsQuery)
+            THEN ts_rank(p.search_vector, to_tsquery('simple', :tsQuery))
+            ELSE 0 
+          END DESC,
           p.created_at DESC
         """, nativeQuery = true,
         countQuery = """
@@ -193,18 +196,17 @@ public interface ProductRepository extends BaseRepository<Product, Long> {
           AND p.seller_id = :sellerId
           AND (:status IS NULL OR p.status = :status)
           AND (
-            p.search_vector @@ websearch_to_tsquery('simple', public.immutable_unaccent(:q))
-            OR (:q_len < 2 AND (
-                p.name ILIKE '%' || :q || '%'
-                OR p.description ILIKE '%' || :q || '%'
-            ))
+            (:tsQuery IS NOT NULL AND p.search_vector @@ to_tsquery('simple', :tsQuery))
+            OR p.name ILIKE '%' || :q || '%'
+            OR p.brand ILIKE '%' || :q || '%'
+            OR p.description ILIKE '%' || :q || '%'
           )
         """)
     Page<Product> searchProductsSellerFulltext(
             @Param("sellerId") Long sellerId,
             @Param("status") String status,
             @Param("q") String q,
-            @Param("q_len") int qLen,
+            @Param("tsQuery") String tsQuery,
             Pageable pageable
     );
 

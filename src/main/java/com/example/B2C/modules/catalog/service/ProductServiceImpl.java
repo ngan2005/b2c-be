@@ -8,6 +8,7 @@ import com.example.B2C.common.response.PageResponse;
 import com.example.B2C.modules.catalog.dto.*;
 import com.example.B2C.modules.catalog.entity.*;
 import com.example.B2C.modules.catalog.repository.*;
+import com.example.B2C.modules.catalog.util.SearchQueryUtils;
 import com.example.B2C.modules.seller.entity.Seller;
 import com.example.B2C.modules.seller.entity.SellerStatus;
 import com.example.B2C.modules.seller.repository.SellerRepository;
@@ -80,7 +81,7 @@ public class ProductServiceImpl implements ProductService {
                     pageable);
         } else {
             String trimmed = keyword.trim();
-            // Nâng cấp lên Full-Text Search PostgreSQL (tsvector + GIN index) kèm fallback LIKE
+            String tsQuery = SearchQueryUtils.toPrefixTsQuery(trimmed);
             Page<Product> ftsPage = null;
             try {
                 ftsPage = productRepository.searchProductsFulltext(
@@ -92,21 +93,26 @@ public class ProductServiceImpl implements ProductService {
                         request.getBrand(),
                         request.getMinRating(),
                         trimmed,
-                        trimmed.length(),
+                        tsQuery,
                         pageable);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                log.warn("FTS search failed for keyword '{}' (tsQuery: '{}'): {}", trimmed, tsQuery, e.getMessage());
             }
 
-            productPage = (ftsPage != null) ? ftsPage : productRepository.searchProductsWithKeywordLike(
-                    ProductStatus.ACTIVE,
-                    request.getCategoryId(),
-                    request.getSellerId(),
-                    request.getMinPrice(),
-                    request.getMaxPrice(),
-                    request.getBrand(),
-                    request.getMinRating(),
-                    trimmed,
-                    pageable);
+            if (ftsPage != null && !ftsPage.isEmpty()) {
+                productPage = ftsPage;
+            } else {
+                productPage = productRepository.searchProductsWithKeywordLike(
+                        ProductStatus.ACTIVE,
+                        request.getCategoryId(),
+                        request.getSellerId(),
+                        request.getMinPrice(),
+                        request.getMaxPrice(),
+                        request.getBrand(),
+                        request.getMinRating(),
+                        trimmed,
+                        pageable);
+            }
         }
 
         Page<ProductSummaryDto> dtoPage = productPage.map(this::toSummaryDto);
@@ -176,10 +182,18 @@ public class ProductServiceImpl implements ProductService {
                 clampSize(size),
                 Sort.by(Sort.Direction.DESC, "createdAt"));
         String trimmed = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
-        Page<Product> productPage = (trimmed == null)
-                ? productRepository.findAllBySellerWithoutKeyword(seller, status, pageable)
-                : productRepository.searchProductsSellerFulltext(seller.getId(), status != null ? status.name() : null,
-                        trimmed, trimmed.length(), pageable);
+        Page<Product> productPage;
+        if (trimmed == null) {
+            productPage = productRepository.findAllBySellerWithoutKeyword(seller, status, pageable);
+        } else {
+            String tsQuery = SearchQueryUtils.toPrefixTsQuery(trimmed);
+            productPage = productRepository.searchProductsSellerFulltext(
+                    seller.getId(),
+                    status != null ? status.name() : null,
+                    trimmed,
+                    tsQuery,
+                    pageable);
+        }
         return PageResponse.of(productPage.map(this::toSummaryDto));
     }
 
@@ -545,17 +559,26 @@ public class ProductServiceImpl implements ProductService {
         String trimmed = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
 
         org.springframework.data.domain.Page<Product> productPage;
-        if (status != null) {
-            if (trimmed == null) {
+        if (trimmed == null) {
+            if (status != null) {
                 productPage = productRepository.searchProductsWithoutKeyword(
                         status, null, sellerId, null, null, null, null, pageable);
             } else {
-                productPage = productRepository.searchProductsFulltext(
-                        status.name(), null, sellerId, null, null, null, null, trimmed, trimmed.length(), pageable);
+                productPage = productRepository.findAllDeletedAtIsNull(pageable);
             }
         } else {
-            // No status filter — list all non-deleted products (no keyword FTS path needed)
-            productPage = productRepository.findAllDeletedAtIsNull(pageable);
+            String tsQuery = SearchQueryUtils.toPrefixTsQuery(trimmed);
+            productPage = productRepository.searchProductsFulltext(
+                    status != null ? status.name() : null,
+                    null,
+                    sellerId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    trimmed,
+                    tsQuery,
+                    pageable);
         }
         return PageResponse.of(productPage.map(this::toAdminSummaryDto));
     }
