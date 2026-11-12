@@ -2,6 +2,7 @@ package com.example.B2C.modules.auth.controller;
 
 import com.example.B2C.common.response.ApiResponse;
 import com.example.B2C.modules.auth.dto.AuthResponse;
+import com.example.B2C.modules.auth.dto.GoogleLoginRequest;
 import com.example.B2C.modules.auth.dto.LoginRequest;
 import com.example.B2C.modules.auth.dto.RefreshTokenRequest;
 import com.example.B2C.modules.auth.dto.RegisterRequest;
@@ -54,6 +55,22 @@ public class AuthController {
     public ResponseEntity<ApiResponse<AuthResponse>> login(@Valid @RequestBody LoginRequest request) {
         AuthResponse response = authService.login(request);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PostMapping("/google")
+    @Operation(
+            summary = "Authenticate with Google ID Token (Mobile / SPA)",
+            description = "Validates the Google ID token obtained from native Google Sign-In, "
+                    + "links or auto-registers the user, and returns JWT access and refresh tokens."
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Login successful, tokens returned"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Invalid or expired Google token"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Missing or malformed ID token")
+    })
+    public ResponseEntity<ApiResponse<AuthResponse>> googleLogin(@Valid @RequestBody GoogleLoginRequest request) {
+        AuthResponse response = authService.loginWithGoogle(request);
+        return ResponseEntity.ok(ApiResponse.success("Đăng nhập Google thành công", response));
     }
 
     @PostMapping("/refresh-token")

@@ -1,6 +1,7 @@
 package com.example.B2C.modules.auth.service;
 
 import com.example.B2C.modules.auth.dto.AuthResponse;
+import com.example.B2C.modules.auth.dto.GoogleLoginRequest;
 import com.example.B2C.modules.auth.dto.LoginRequest;
 import com.example.B2C.modules.auth.dto.RefreshTokenRequest;
 import com.example.B2C.modules.auth.dto.RegisterRequest;
@@ -9,6 +10,9 @@ import com.example.B2C.common.exception.UnauthorizedException;
 import com.example.B2C.security.CustomUserDetails;
 import com.example.B2C.security.CustomUserDetailsService;
 import com.example.B2C.security.JwtTokenProvider;
+import com.example.B2C.security.oauth2.CustomOAuth2UserService;
+import com.example.B2C.security.oauth2.GoogleTokenVerifier;
+import com.example.B2C.modules.user.entity.AuthProvider;
 import com.example.B2C.modules.user.entity.Role;
 import com.example.B2C.modules.user.entity.RoleCode;
 import com.example.B2C.modules.user.entity.User;
@@ -42,6 +46,8 @@ public class AuthServiceImpl implements AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthenticationManager authenticationManager;
     private final CustomUserDetailsService userDetailsService;
+    private final GoogleTokenVerifier googleTokenVerifier;
+    private final CustomOAuth2UserService customOAuth2UserService;
 
     @Override
     @Transactional
@@ -147,6 +153,36 @@ public class AuthServiceImpl implements AuthService {
         return AuthResponse.builder()
                 .accessToken(newAccessToken)
                 .refreshToken(newRefreshToken)
+                .tokenType("Bearer")
+                .userId(user.getId())
+                .email(user.getEmail())
+                .fullName(user.getFullName())
+                .role(UserRoleResolver.getHighestRoleCode(user))
+                .roles(UserRoleResolver.getAllRoleCodes(user))
+                .build();
+    }
+
+    @Override
+    @Transactional
+    public AuthResponse loginWithGoogle(GoogleLoginRequest request) {
+        GoogleTokenVerifier.GoogleUserPayload payload = googleTokenVerifier.verify(request.getIdToken());
+
+        User user = customOAuth2UserService.resolveOrCreate(
+                AuthProvider.GOOGLE,
+                payload.providerUserId(),
+                payload.email(),
+                payload.fullName(),
+                payload.avatarUrl()
+        );
+
+        CustomUserDetails userDetails = new CustomUserDetails(user);
+        Map<String, Object> claims = Map.of("uid", user.getId());
+        String accessToken = jwtTokenProvider.generateToken(claims, userDetails);
+        String refreshToken = jwtTokenProvider.generateRefreshToken(userDetails);
+
+        return AuthResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
                 .tokenType("Bearer")
                 .userId(user.getId())
                 .email(user.getEmail())
