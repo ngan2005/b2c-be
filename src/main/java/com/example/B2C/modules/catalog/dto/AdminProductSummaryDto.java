@@ -27,6 +27,7 @@ public class AdminProductSummaryDto {
     private Integer soldCount;
     private Long sellerId;
     private String shopName;
+    private Integer totalStock;
     private Long categoryId;
     private String categoryName;
     private ProductStatus status;

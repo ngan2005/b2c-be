@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -48,6 +49,14 @@ public interface ProductVariantRepository extends BaseRepository<ProductVariant,
         ORDER BY v.price ASC
         """)
     List<ProductVariant> findAllByProductId(@Param("productId") Long productId);
+
+    @Query("""
+        SELECT v.product.id, COALESCE(SUM(v.stockQuantity), 0)
+        FROM ProductVariant v
+        WHERE v.product.id IN :productIds
+        GROUP BY v.product.id
+        """)
+    List<Object[]> sumStockByProductIds(@Param("productIds") Collection<Long> productIds);
 
     /**
      * Count low-stock variants of a seller. "Low stock" means stock below the

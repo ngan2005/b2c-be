@@ -38,6 +38,9 @@ public class PaymentController {
     private final VnPayConfig vnpayConfig;
     private final CurrentUserProvider currentUserProvider;
 
+    @org.springframework.beans.factory.annotation.Value("${app.frontend.url:http://localhost:5173}")
+    private String frontendBase;
+
     @GetMapping("/orders/{orderId}")
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "List all payment records for an order")
@@ -85,22 +88,13 @@ public class PaymentController {
 
         log.info("VNPay return callback received: {}", params);
 
-        // Strip the backend path to get the frontend base URL
-        String frontendBase;
-        try {
-            String returnUrl = vnpayConfig.getReturnUrl();
-            int idx = returnUrl.indexOf("/api/v1/payments/return");
-            if (idx < 0) {
-                idx = returnUrl.indexOf("/payment/return");
-            }
-            frontendBase = idx > 0 ? returnUrl.substring(0, idx) : "http://localhost:5173";
-        } catch (Exception e) {
-            frontendBase = "http://localhost:5173";
-        }
+        String targetFrontend = (this.frontendBase != null && !this.frontendBase.isBlank())
+                ? this.frontendBase
+                : "http://localhost:5173";
 
         if (!vnpayService.verifyCallback(params)) {
             log.warn("VNPay return: invalid signature — params={}", params);
-            response.sendRedirect(frontendBase + "/payment/return?status=error&message=invalid_signature");
+            response.sendRedirect(targetFrontend + "/payment/return?status=error&message=invalid_signature");
             return;
         }
 
@@ -118,7 +112,7 @@ public class PaymentController {
                 log.error("Failed to process VNPay success return for txnRef={}: {}",
                         parsed.getTxnRef(), e.getMessage());
             }
-            response.sendRedirect(frontendBase + "/payment/return?status=success&orderCode=" + parsed.getOrderCode());
+            response.sendRedirect(targetFrontend + "/payment/return?status=success&orderCode=" + parsed.getOrderCode());
         } else {
             try {
                 paymentService.confirmPaymentByTxnRef(
@@ -132,7 +126,7 @@ public class PaymentController {
                         parsed.getTxnRef(), e.getMessage());
             }
             log.info("VNPay payment declined: responseCode={}", parsed.getResponseCode());
-            response.sendRedirect(frontendBase + "/payment/return?status=failed&orderCode=" + parsed.getOrderCode());
+            response.sendRedirect(targetFrontend + "/payment/return?status=failed&orderCode=" + parsed.getOrderCode());
         }
     }
 }

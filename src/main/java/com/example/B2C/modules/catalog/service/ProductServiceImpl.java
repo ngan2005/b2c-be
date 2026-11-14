@@ -588,7 +588,21 @@ public class ProductServiceImpl implements ProductService {
                     null,
                     ftsPageable);
         }
-        return PageResponse.of(productPage.map(this::toAdminSummaryDto));
+        List<Long> productIds = productPage.getContent().stream()
+                .map(Product::getId)
+                .toList();
+
+        Map<Long, Integer> stockMap = new HashMap<>();
+        if (!productIds.isEmpty()) {
+            List<Object[]> stockRows = productVariantRepository.sumStockByProductIds(productIds);
+            for (Object[] row : stockRows) {
+                Long pId = (Long) row[0];
+                Number total = (Number) row[1];
+                stockMap.put(pId, total != null ? total.intValue() : 0);
+            }
+        }
+
+        return PageResponse.of(productPage.map(p -> toAdminSummaryDto(p, stockMap.getOrDefault(p.getId(), 0))));
     }
 
     @Override
@@ -609,7 +623,7 @@ public class ProductServiceImpl implements ProductService {
         return toDetailDto(saved);
     }
 
-    private AdminProductSummaryDto toAdminSummaryDto(Product product) {
+    private AdminProductSummaryDto toAdminSummaryDto(Product product, Integer totalStock) {
         return AdminProductSummaryDto.builder()
                 .id(product.getId())
                 .slug(product.getSlug())
@@ -621,6 +635,7 @@ public class ProductServiceImpl implements ProductService {
                 .ratingAvg(product.getRatingAvg())
                 .ratingCount(product.getRatingCount())
                 .soldCount(product.getSoldCount())
+                .totalStock(totalStock)
                 .sellerId(product.getSeller() != null ? product.getSeller().getId() : null)
                 .shopName(product.getSeller() != null ? product.getSeller().getShopName() : null)
                 .categoryId(product.getCategory() != null ? product.getCategory().getId() : null)
